@@ -235,7 +235,8 @@ export function LaunchGate({
       return
     }
     if (currentStep === 'location') {
-      startInstallation()
+      // Skip model download — user can download later from Settings.
+      setCurrentStep('complete')
       return
     }
     if (currentStep === 'complete') {
@@ -258,7 +259,7 @@ export function LaunchGate({
   // Get button text
   const getNextButtonText = () => {
     if (currentStep === 'license') return licenseOnly ? 'Accept' : 'Next'
-    if (currentStep === 'location') return 'Install'
+    if (currentStep === 'location') return 'Continue'
     if (currentStep === 'complete') return 'Finish'
     return 'Continue'
   }

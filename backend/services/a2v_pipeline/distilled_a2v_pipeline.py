@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from services.services_utils import AudioOrNone, TilingConfigType, sync_device
+from services.services_utils import AudioOrNone, TilingConfigType, default_dtype_for_device, is_mps_device, sync_device
 
 if TYPE_CHECKING:
     from ltx_core.loader.primitives import LoraPathStrengthAndSDOps
@@ -44,7 +44,7 @@ class DistilledA2VPipeline:
             device = get_device()
 
         self.device = device
-        self.dtype = torch.bfloat16
+        self.dtype = default_dtype_for_device(device)
 
         self.model_ledger = ModelLedger(
             dtype=self.dtype,
@@ -102,7 +102,7 @@ class DistilledA2VPipeline:
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
         stepper = EulerDiffusionStep()
-        dtype = torch.bfloat16
+        dtype = self.dtype
 
         # Text encode (positive only).
         text_encoder = self.model_ledger.text_encoder()
@@ -224,8 +224,9 @@ class DistilledA2VPipeline:
         del video_encoder
         cleanup_memory()
 
-        # Decode video; return original audio (not VAE-decoded) for fidelity.
-        decoded_video = vae_decode_video(video_state.latent, self.model_ledger.video_decoder(), tiling_config, generator)
+        # On MPS, run VAE decode in float32 for stability.
+        _video_latent = video_state.latent.to(torch.float32) if is_mps_device(self.device) else video_state.latent
+        decoded_video = vae_decode_video(_video_latent, self.model_ledger.video_decoder(), tiling_config, generator)
 
         # Trim waveform to target video duration so the muxed output doesn't
         # extend beyond the generated video frames.

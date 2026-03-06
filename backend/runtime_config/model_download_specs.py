@@ -23,6 +23,8 @@ class ModelFileDownloadSpec:
 
 
 MODEL_FILE_ORDER: tuple[ModelFileType, ...] = (
+    "checkpoint_full",
+    "distill_lora",
     "checkpoint",
     "upsampler",
     "text_encoder",
@@ -36,7 +38,21 @@ DEFAULT_MODEL_DOWNLOAD_SPECS: dict[ModelFileType, ModelFileDownloadSpec] = {
         expected_size_bytes=43_000_000_000,
         is_folder=False,
         repo_id="Lightricks/LTX-2.3",
-        description="Main transformer model",
+        description="Main transformer model (distilled, legacy)",
+    ),
+    "checkpoint_full": ModelFileDownloadSpec(
+        relative_path=Path("ltx-2.3-22b-dev.safetensors"),
+        expected_size_bytes=19_000_000_000,
+        is_folder=False,
+        repo_id="Lightricks/LTX-2.3",
+        description="Full transformer model (non-distilled)",
+    ),
+    "distill_lora": ModelFileDownloadSpec(
+        relative_path=Path("ltx-2.3-22b-distilled-lora-384.safetensors"),
+        expected_size_bytes=7_100_000_000,
+        is_folder=False,
+        repo_id="Lightricks/LTX-2.3",
+        description="Distillation LoRA for fast mode",
     ),
     "upsampler": ModelFileDownloadSpec(
         relative_path=Path("ltx-2.3-spatial-upscaler-x2-1.0.safetensors"),
@@ -63,7 +79,7 @@ DEFAULT_MODEL_DOWNLOAD_SPECS: dict[ModelFileType, ModelFileDownloadSpec] = {
 
 
 DEFAULT_REQUIRED_MODEL_TYPES: frozenset[ModelFileType] = frozenset(
-    {"checkpoint", "upsampler", "zit"}
+    {"checkpoint_full", "distill_lora", "upsampler", "zit"}
 )
 
 

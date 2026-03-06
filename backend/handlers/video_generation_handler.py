@@ -97,7 +97,10 @@ class VideoGenerationHandler(StateHandlerBase):
         if audio_path:
             return self._generate_a2v(req, duration, fps, audio_path=audio_path)
 
-        logger.info("Resolution %s - using fast pipeline", resolution)
+        model_type = req.model.strip().lower()
+        if model_type not in ("fast", "pro"):
+            model_type = "fast"
+        logger.info("Resolution %s - using %s pipeline", resolution, model_type)
 
         RESOLUTION_MAP_16_9: dict[str, tuple[int, int]] = {
             "540p": (960, 544),
@@ -126,16 +129,24 @@ class VideoGenerationHandler(StateHandlerBase):
             image = self._prepare_image(image_path, width, height)
             logger.info("Image: %s -> %sx%s", image_path, width, height)
 
+        last_frame_image = None
+        last_frame_image_path = normalize_optional_path(req.lastFrameImagePath)
+        if last_frame_image_path:
+            last_frame_image = self._prepare_image(last_frame_image_path, width, height)
+            logger.info("Last frame image: %s -> %sx%s", last_frame_image_path, width, height)
+
         generation_id = self._make_generation_id()
         seed = self._resolve_seed()
 
         try:
-            self._pipelines.load_gpu_pipeline("fast", should_warm=False)
+            pipeline_model_type = "pro" if model_type == "pro" else "fast"
+            self._pipelines.load_gpu_pipeline(pipeline_model_type, should_warm=False)
             self._generation.start_generation(generation_id)
 
             output_path = self.generate_video(
                 prompt=req.prompt,
                 image=image,
+                last_frame_image=last_frame_image,
                 height=height,
                 width=width,
                 num_frames=num_frames,
@@ -143,6 +154,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 seed=seed,
                 camera_motion=req.cameraMotion,
                 negative_prompt=req.negativePrompt,
+                model_type=pipeline_model_type,
             )
 
             self._generation.complete_generation(output_path)
@@ -167,22 +179,33 @@ class VideoGenerationHandler(StateHandlerBase):
         seed: int,
         camera_motion: VideoCameraMotion,
         negative_prompt: str,
+        model_type: str = "fast",
+        last_frame_image: Image.Image | None = None,
     ) -> str:
+        from services.interfaces import VideoPipelineModelType
+
         t_total_start = time.perf_counter()
         gen_mode = "i2v" if image is not None else "t2v"
-        logger.info("[%s] Generation started (model=fast, %dx%d, %d frames, %d fps)", gen_mode, width, height, num_frames, int(fps))
+        logger.info("[%s] Generation started (model=%s, %dx%d, %d frames, %d fps)", gen_mode, model_type, width, height, num_frames, int(fps))
 
         if self._generation.is_generation_cancelled():
             raise RuntimeError("Generation was cancelled")
 
-        if not self._config.model_path("checkpoint").exists():
+        has_checkpoint = self._config.model_path("checkpoint_full").exists() or self._config.model_path("checkpoint").exists()
+        if not has_checkpoint:
             raise RuntimeError("Models not downloaded. Please download the AI models first using the Model Status menu.")
 
-        total_steps = 8
+        settings = self.state.app_settings
+        if model_type == "pro":
+            total_steps = settings.pro_model.steps
+        else:
+            total_steps = settings.fast_model.steps
+
+        pipeline_type: VideoPipelineModelType = "pro" if model_type == "pro" else "fast"
 
         self._generation.update_progress("loading_model", 5, 0, total_steps)
         t_load_start = time.perf_counter()
-        pipeline_state = self._pipelines.load_gpu_pipeline("fast", should_warm=False)
+        pipeline_state = self._pipelines.load_gpu_pipeline(pipeline_type, should_warm=False)
         t_load_end = time.perf_counter()
         logger.info("[%s] Pipeline load: %.2fs", gen_mode, t_load_end - t_load_start)
 
@@ -195,12 +218,16 @@ class VideoGenerationHandler(StateHandlerBase):
         if image is not None:
             temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
             image.save(temp_image_path)
-            images = [ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0)]
+            images.append(ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0))
+        temp_last_image_path: str | None = None
+        if last_frame_image is not None:
+            temp_last_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+            last_frame_image.save(temp_last_image_path)
+            images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=num_frames - 1, strength=1.0))
 
         output_path = self._make_output_path()
 
         try:
-            settings = self.state.app_settings
             use_api_encoding = not self._text.should_use_local_encoding()
             if image is not None:
                 enhance = use_api_encoding and settings.prompt_enhancer_enabled_i2v
@@ -219,16 +246,32 @@ class VideoGenerationHandler(StateHandlerBase):
             width = round(width / 64) * 64
 
             t_inference_start = time.perf_counter()
-            pipeline_state.pipeline.generate(
-                prompt=enhanced_prompt,
-                seed=seed,
-                height=height,
-                width=width,
-                num_frames=num_frames,
-                frame_rate=fps,
-                images=images,
-                output_path=str(output_path),
-            )
+            neg = negative_prompt if negative_prompt else self._default_negative_prompt
+
+            if model_type == "pro":
+                pipeline_state.pipeline.generate(
+                    prompt=enhanced_prompt,
+                    seed=seed,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    frame_rate=fps,
+                    images=images,
+                    output_path=str(output_path),
+                    negative_prompt=neg,
+                    num_inference_steps=total_steps,
+                )
+            else:
+                pipeline_state.pipeline.generate(
+                    prompt=enhanced_prompt,
+                    seed=seed,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    frame_rate=fps,
+                    images=images,
+                    output_path=str(output_path),
+                )
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)
 
@@ -248,6 +291,8 @@ class VideoGenerationHandler(StateHandlerBase):
             self._text.clear_api_embeddings()
             if temp_image_path and os.path.exists(temp_image_path):
                 os.unlink(temp_image_path)
+            if temp_last_image_path and os.path.exists(temp_last_image_path):
+                os.unlink(temp_last_image_path)
 
     def _generate_a2v(
         self, req: GenerateVideoRequest, duration: int, fps: int, *, audio_path: str
@@ -272,6 +317,12 @@ class VideoGenerationHandler(StateHandlerBase):
         if image_path:
             image = self._prepare_image(image_path, width, height)
 
+        last_frame_image = None
+        temp_last_image_path: str | None = None
+        last_frame_image_path = normalize_optional_path(req.lastFrameImagePath)
+        if last_frame_image_path:
+            last_frame_image = self._prepare_image(last_frame_image_path, width, height)
+
         seed = self._resolve_seed()
 
         generation_id = self._make_generation_id()
@@ -287,7 +338,11 @@ class VideoGenerationHandler(StateHandlerBase):
             if image is not None:
                 temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
                 image.save(temp_image_path)
-                images = [ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0)]
+                images.append(ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0))
+            if last_frame_image is not None:
+                temp_last_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+                last_frame_image.save(temp_last_image_path)
+                images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=num_frames - 1, strength=1.0))
 
             output_path = self._make_output_path()
 
@@ -340,6 +395,8 @@ class VideoGenerationHandler(StateHandlerBase):
             self._text.clear_api_embeddings()
             if temp_image_path and os.path.exists(temp_image_path):
                 os.unlink(temp_image_path)
+            if temp_last_image_path and os.path.exists(temp_last_image_path):
+                os.unlink(temp_last_image_path)
 
     def _prepare_image(self, image_path: str, width: int, height: int) -> Image.Image:
         validated_path = validate_image_file(image_path)

@@ -6,7 +6,14 @@ export interface InferenceSettings {
 }
 
 export interface FastModelSettings {
+  steps: number
   useUpscaler: boolean
+}
+
+export interface UserLoraEntry {
+  path: string
+  strength: number
+  enabled: boolean
 }
 
 export interface AppSettings {
@@ -19,6 +26,7 @@ export interface AppSettings {
   useLocalTextEncoder: boolean
   fastModel: FastModelSettings
   proModel: InferenceSettings
+  userLoras: UserLoraEntry[]
   promptCacheSize: number
   promptEnhancerEnabledT2V: boolean
   promptEnhancerEnabledI2V: boolean
@@ -34,8 +42,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   hasFalApiKey: false,
   hasGeminiApiKey: false,
   useLocalTextEncoder: false,
-  fastModel: { useUpscaler: true },
+  fastModel: { steps: 8, useUpscaler: true },
   proModel: { steps: 20, useUpscaler: true },
+  userLoras: [],
   promptCacheSize: 1,
   promptEnhancerEnabledT2V: false,
   promptEnhancerEnabledI2V: false,
@@ -83,6 +92,7 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     useLocalTextEncoder: data.useLocalTextEncoder ?? DEFAULT_APP_SETTINGS.useLocalTextEncoder,
     fastModel: data.fastModel ?? DEFAULT_APP_SETTINGS.fastModel,
     proModel: data.proModel ?? DEFAULT_APP_SETTINGS.proModel,
+    userLoras: data.userLoras ?? DEFAULT_APP_SETTINGS.userLoras,
     promptCacheSize: data.promptCacheSize ?? DEFAULT_APP_SETTINGS.promptCacheSize,
     promptEnhancerEnabledT2V: data.promptEnhancerEnabledT2V ?? DEFAULT_APP_SETTINGS.promptEnhancerEnabledT2V,
     promptEnhancerEnabledI2V: data.promptEnhancerEnabledI2V ?? DEFAULT_APP_SETTINGS.promptEnhancerEnabledI2V,

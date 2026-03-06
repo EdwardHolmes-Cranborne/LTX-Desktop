@@ -30,7 +30,7 @@ from ltx_core.types import Audio
 from ltx_pipelines.utils.media_io import encode_video, get_videostream_metadata
 
 from services.retake_pipeline.retake_pipeline import RetakePipeline
-from services.services_utils import sync_device
+from services.services_utils import default_dtype_for_device, is_mps_device, sync_device
 
 if TYPE_CHECKING:
     from ltx_core.types import LatentState
@@ -67,7 +67,7 @@ class LTXRetakePipeline:
         from ltx_pipelines.utils.types import PipelineComponents
 
         self.device = device
-        self.dtype = torch.bfloat16
+        self.dtype = default_dtype_for_device(device)
 
         self.model_ledger = ModelLedger(
             dtype=self.dtype,
@@ -321,16 +321,21 @@ class LTXRetakePipeline:
         del transformer, denoising_loop
         cleanup_memory()
 
+        # On MPS, run VAE decode in float32 for stability.
+        _mps = is_mps_device(self.device)
+
         # --- Decode audio first (eager, small) then free those models ---
+        _audio_latent = audio_state.latent.to(torch.float32) if _mps else audio_state.latent
         decoded_audio = vae_decode_audio(
-            audio_state.latent, self.model_ledger.audio_decoder(), self.model_ledger.vocoder(),
+            _audio_latent, self.model_ledger.audio_decoder(), self.model_ledger.vocoder(),
         )
         del audio_state
         cleanup_memory()
 
         # --- Decode video (lazy generator, tiled) ---
+        _video_latent = video_state.latent.to(torch.float32) if _mps else video_state.latent
         decoded_video = vae_decode_video(
-            video_state.latent, self.model_ledger.video_decoder(), tiling, generator,
+            _video_latent, self.model_ledger.video_decoder(), tiling, generator,
         )
 
         return decoded_video, decoded_audio

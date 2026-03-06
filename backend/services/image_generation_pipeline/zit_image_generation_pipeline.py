@@ -10,7 +10,7 @@ import torch
 from diffusers.pipelines.auto_pipeline import ZImagePipeline  # type: ignore[reportUnknownVariableType]
 from PIL.Image import Image as PILImage
 
-from services.services_utils import ImagePipelineOutputLike, PILImageType, get_device_type
+from services.services_utils import ImagePipelineOutputLike, PILImageType, default_dtype_for_device, get_device_type
 
 
 @dataclass(slots=True)
@@ -31,14 +31,14 @@ class ZitImageGenerationPipeline:
         self._cpu_offload_active = False
         self.pipeline = ZImagePipeline.from_pretrained(  # type: ignore[reportUnknownMemberType]
             model_path,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=default_dtype_for_device(device),
         )
         if device is not None:
             self.to(device)
 
     def _resolve_generator_device(self) -> str:
         if self._cpu_offload_active:
-            return "cuda"
+            return self._device or "cuda"
         if self._device is not None:
             return self._device
 

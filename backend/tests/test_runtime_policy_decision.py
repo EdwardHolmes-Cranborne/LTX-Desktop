@@ -5,9 +5,13 @@ from __future__ import annotations
 from runtime_config.runtime_policy import decide_force_api_generations
 
 
-def test_darwin_always_forces_api() -> None:
-    assert decide_force_api_generations(system="Darwin", cuda_available=True, vram_gb=24) is True
+def test_darwin_without_mps_forces_api() -> None:
     assert decide_force_api_generations(system="Darwin", cuda_available=False, vram_gb=None) is True
+    assert decide_force_api_generations(system="Darwin", cuda_available=False, vram_gb=None, mps_available=False) is True
+
+
+def test_darwin_with_mps_allows_local() -> None:
+    assert decide_force_api_generations(system="Darwin", cuda_available=False, vram_gb=None, mps_available=True) is False
 
 
 def test_windows_without_cuda_forces_api() -> None:

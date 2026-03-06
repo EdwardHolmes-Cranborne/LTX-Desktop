@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Download, Film, Info, KeyRound, Settings, Sliders, Sparkles, X, Zap } from 'lucide-react'
+import { AlertCircle, Check, CheckCircle2, Clock, Download, Film, HardDrive, Info, KeyRound, Loader2, Settings, Sliders, Sparkles, X, Zap } from 'lucide-react'
 import React, { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import { useAppSettings, type AppSettings } from '../contexts/AppSettingsContext'
@@ -11,13 +11,44 @@ interface TextEncoderStatus {
   expected_size_gb: number
 }
 
+interface ModelInfo {
+  name: string
+  description: string
+  downloaded: boolean
+  size: number
+  expected_size: number
+  required?: boolean
+}
+
+interface ModelsStatus {
+  models: ModelInfo[]
+  all_downloaded: boolean
+  total_size: number
+  downloaded_size: number
+  total_size_gb: number
+  downloaded_size_gb: number
+}
+
+interface ModelDownloadProgress {
+  status: 'idle' | 'downloading' | 'complete' | 'error'
+  currentFile: string
+  currentFileProgress: number
+  totalProgress: number
+  downloadedBytes: number
+  totalBytes: number
+  filesCompleted: number
+  totalFiles: number
+  error: string | null
+  speedMbps: number
+}
+
 interface SettingsModalProps {
   isOpen: boolean
   onClose: () => void
   initialTab?: TabId
 }
 
-type TabId = 'general' | 'apiKeys' | 'inference' | 'promptEnhancer' | 'about'
+type TabId = 'general' | 'apiKeys' | 'inference' | 'loras' | 'promptEnhancer' | 'about'
 
 export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
   const { settings, updateSettings, saveLtxApiKey, saveFalApiKey, saveGeminiApiKey, forceApiGenerations } = useAppSettings()
@@ -40,7 +71,63 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
   const [modelLicenseText, setModelLicenseText] = useState<string | null>(null)
   const [modelLicenseLoading, setModelLicenseLoading] = useState(false)
   const [showModelLicense, setShowModelLicense] = useState(false)
-  const [analyticsEnabled, setAnalyticsEnabled] = useState(false)
+  const [modelsStatus, setModelsStatus] = useState<ModelsStatus | null>(null)
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null)
+  const [backendUrl, setBackendUrl] = useState<string | null>(null)
+
+  // Fetch backend URL once
+  useEffect(() => {
+    window.electronAPI.getBackendUrl().then(setBackendUrl).catch(() => {})
+  }, [])
+
+  // Poll model status & download progress when general tab is open
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'general' || !backendUrl) return
+
+    const fetchStatus = async () => {
+      try {
+        const [statusRes, progressRes] = await Promise.all([
+          fetch(`${backendUrl}/api/models/status`),
+          fetch(`${backendUrl}/api/models/download/progress`),
+        ])
+        if (statusRes.ok) setModelsStatus(await statusRes.json())
+        if (progressRes.ok) setModelDownloadProgress(await progressRes.json())
+      } catch (e) {
+        logger.error(`Failed to fetch model status: ${e}`)
+      }
+    }
+
+    fetchStatus()
+    const interval = setInterval(fetchStatus, modelDownloadProgress?.status === 'downloading' ? 500 : 5000)
+    return () => clearInterval(interval)
+  }, [isOpen, activeTab, backendUrl, modelDownloadProgress?.status])
+
+  const startModelDownload = async () => {
+    if (!backendUrl) return
+    try {
+      await fetch(`${backendUrl}/api/models/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skipTextEncoder: settings.hasLtxApiKey }),
+      })
+    } catch (e) {
+      logger.error(`Failed to start model download: ${e}`)
+    }
+  }
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`
+    return `${(bytes / 1e3).toFixed(1)} KB`
+  }
+
+  const formatTimeRemaining = (bytesRemaining: number, speedMbps: number): string => {
+    if (speedMbps <= 0) return 'Calculating...'
+    const seconds = (bytesRemaining / 1e6) / speedMbps
+    if (seconds < 60) return `${Math.ceil(seconds)}s`
+    if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`
+    return `${(seconds / 3600).toFixed(1)}h`
+  }
 
   // Sync active tab with initialTab prop when modal opens
   useEffect(() => {
@@ -68,13 +155,6 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     window.electronAPI.getAppInfo().then(info => setAppVersion(info.version)).catch(() => {})
   }, [activeTab, appVersion])
 
-  // Fetch analytics state when modal opens
-  useEffect(() => {
-    if (!isOpen) return
-    window.electronAPI.getAnalyticsState()
-      .then((state: { analyticsEnabled: boolean }) => setAnalyticsEnabled(state.analyticsEnabled))
-      .catch(() => {})
-  }, [isOpen])
 
   // Fetch text encoder status when modal opens
   useEffect(() => {
@@ -190,11 +270,55 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     })
   }
 
+  const handleFastStepsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const steps = Math.max(1, Math.min(100, parseInt(e.target.value) || 8))
+    onSettingsChange({
+      ...settings,
+      fastModel: { ...settings.fastModel, steps },
+    })
+  }
+
   const handleProUpscalerToggle = () => {
     onSettingsChange({
       ...settings,
       proModel: { ...settings.proModel, useUpscaler: !settings.proModel.useUpscaler },
     })
+  }
+
+  const handleAddLora = async () => {
+    try {
+      const result = await window.electronAPI.showOpenFileDialog({
+        title: 'Select LoRA File',
+        filters: [{ name: 'SafeTensors', extensions: ['safetensors'] }],
+      })
+      if (result && result.length > 0) {
+        const newLora = { path: result[0], strength: 1.0, enabled: true }
+        onSettingsChange({
+          ...settings,
+          userLoras: [...(settings.userLoras || []), newLora],
+        })
+      }
+    } catch (e) {
+      logger.error(`Failed to open file dialog: ${e}`)
+    }
+  }
+
+  const handleRemoveLora = (index: number) => {
+    const loras = [...(settings.userLoras || [])]
+    loras.splice(index, 1)
+    onSettingsChange({ ...settings, userLoras: loras })
+  }
+
+  const handleToggleLora = (index: number) => {
+    const loras = [...(settings.userLoras || [])]
+    loras[index] = { ...loras[index], enabled: !loras[index].enabled }
+    onSettingsChange({ ...settings, userLoras: loras })
+  }
+
+  const handleLoraStrengthChange = (index: number, strength: number) => {
+    const loras = [...(settings.userLoras || [])]
+    loras[index] = { ...loras[index], strength: Math.max(0, Math.min(2, strength)) }
+    onSettingsChange({ ...settings, userLoras: loras })
   }
 
   // Prompt Enhancer handlers
@@ -204,12 +328,6 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     } else {
       onSettingsChange({ ...settings, promptEnhancerEnabledI2V: !settings.promptEnhancerEnabledI2V })
     }
-  }
-  // Analytics handler
-  const handleToggleAnalytics = () => {
-    const next = !analyticsEnabled
-    setAnalyticsEnabled(next)
-    window.electronAPI.setAnalyticsEnabled(next).catch(() => {})
   }
 
   // Seed handlers
@@ -265,6 +383,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     { id: 'general' as TabId, label: 'General', icon: Settings },
     { id: 'apiKeys' as TabId, label: 'API Keys', icon: KeyRound },
     { id: 'inference' as TabId, label: 'Inference', icon: Sliders },
+    { id: 'loras' as TabId, label: 'LoRAs', icon: Film },
     { id: 'promptEnhancer' as TabId, label: 'Prompt Enhancer', icon: Sparkles },
     { id: 'about' as TabId, label: 'About', icon: Info },
   ]
@@ -320,6 +439,126 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
         <div className="px-6 py-5 space-y-6 h-[60vh] overflow-y-auto">
           {activeTab === 'general' && (
             <>
+              {/* Model Downloads Section */}
+              {!forceApiGenerations && (
+                <div className="space-y-3 pb-4 border-b border-zinc-800 mb-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <HardDrive className="h-4 w-4 text-violet-400" />
+                      <h3 className="text-sm font-semibold text-white">Models</h3>
+                    </div>
+                    {modelsStatus && (
+                      <span className="text-xs text-zinc-500">
+                        {modelsStatus.downloaded_size_gb.toFixed(1)} / {modelsStatus.total_size_gb.toFixed(1)} GB
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Model list */}
+                  {modelsStatus?.models.filter(m => m.required).map((model) => (
+                    <div key={model.name} className="flex items-center gap-3 px-1">
+                      {model.downloaded ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
+                      ) : (
+                        <Download className="h-4 w-4 text-zinc-600 flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-white font-medium truncate">{model.name}</div>
+                        <div className="text-xs text-zinc-600 truncate">{model.description}</div>
+                      </div>
+                      <div className="text-xs text-zinc-500 flex-shrink-0">
+                        {formatBytes(model.expected_size)}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Download progress */}
+                  {modelDownloadProgress?.status === 'downloading' && (
+                    <div className="bg-blue-500/5 rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-blue-300 font-medium flex items-center gap-1.5">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Downloading {modelDownloadProgress.currentFile}
+                        </span>
+                        <span className="text-xs text-blue-400 font-semibold">
+                          {modelDownloadProgress.speedMbps.toFixed(1)} MB/s
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 transition-all duration-300"
+                          style={{ width: `${modelDownloadProgress.totalProgress}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-zinc-500">
+                        <span>{modelDownloadProgress.totalProgress}% — {modelDownloadProgress.filesCompleted}/{modelDownloadProgress.totalFiles} files</span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatTimeRemaining(
+                            modelDownloadProgress.totalBytes - modelDownloadProgress.downloadedBytes,
+                            modelDownloadProgress.speedMbps
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error state */}
+                  {modelDownloadProgress?.status === 'error' && modelDownloadProgress.error && (
+                    <div className="bg-red-500/10 rounded-lg p-3">
+                      <p className="text-xs text-red-400">{modelDownloadProgress.error}</p>
+                      <button onClick={startModelDownload} className="mt-1 text-xs text-red-300 hover:text-red-200 underline">
+                        Retry
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Download / Browse buttons */}
+                  {modelsStatus && !modelsStatus.all_downloaded && modelDownloadProgress?.status !== 'downloading' && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={startModelDownload}
+                        className="flex-1 py-2 px-4 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download Models
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const dir = await window.electronAPI.showOpenDirectoryDialog({ title: 'Select folder containing model files' })
+                          if (!dir || !backendUrl) return
+                          try {
+                            const res = await fetch(`${backendUrl}/api/models/link`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ sourceDir: dir }),
+                            })
+                            if (res.ok) {
+                              // Refresh status
+                              const statusRes = await fetch(`${backendUrl}/api/models/status`)
+                              if (statusRes.ok) setModelsStatus(await statusRes.json())
+                            }
+                          } catch (e) {
+                            logger.error(`Failed to link models: ${e}`)
+                          }
+                        }}
+                        className="py-2 px-4 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                        title="Point to a folder containing already-downloaded model files"
+                      >
+                        Browse
+                      </button>
+                    </div>
+                  )}
+
+                  {modelsStatus?.all_downloaded && modelDownloadProgress?.status !== 'downloading' && (
+                    <div className="flex items-center gap-2 text-green-400 text-xs px-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>All models downloaded and ready</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {!forceApiGenerations && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
@@ -677,42 +916,6 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 </div>
               </div>
 
-              {/* Anonymous Analytics Setting */}
-              <div className="space-y-3 pt-4 border-t border-zinc-800">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <svg className="h-4 w-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="20" x2="18" y2="10" />
-                        <line x1="12" y1="20" x2="12" y2="4" />
-                        <line x1="6" y1="20" x2="6" y2="14" />
-                      </svg>
-                      <label className="text-sm font-medium text-white">
-                        Anonymous Analytics
-                      </label>
-                    </div>
-                    <p className="text-xs text-zinc-500 leading-relaxed">
-                      Share anonymous usage data to help improve LTX Desktop.
-                      Only basic technical information is collected — never personal data or generated content.
-                    </p>
-                  </div>
-
-                  {/* Toggle Switch */}
-                  <button
-                    onClick={handleToggleAnalytics}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      analyticsEnabled ? 'bg-violet-500' : 'bg-zinc-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        analyticsEnabled ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-              </div>
             </>
           )}
 
@@ -918,13 +1121,20 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 </div>
 
                 <div className="bg-zinc-800/50 rounded-lg p-4 space-y-4">
-                  {/* Steps Info */}
+                  {/* Steps */}
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-sm text-white">Inference Steps</label>
-                      <p className="text-xs text-zinc-500">Fixed at 8 steps (built into distilled model)</p>
+                      <p className="text-xs text-zinc-500">Default 8 for distilled model</p>
                     </div>
-                    <span className="px-3 py-1.5 bg-zinc-700 rounded-lg text-sm text-zinc-400">8</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={settings.fastModel?.steps ?? 8}
+                      onChange={handleFastStepsChange}
+                      className="w-20 px-3 py-1.5 bg-zinc-700 border border-zinc-600 rounded-lg text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
                   </div>
 
                   {/* Upscaler Toggle */}
@@ -950,7 +1160,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
 
                 {/* Summary */}
                 <div className="text-xs text-zinc-500">
-                  Current: 8 steps, {settings.fastModel?.useUpscaler !== false ? 'with upscaler (2-stage, recommended)' : 'native resolution (experimental)'}
+                  Current: {settings.fastModel?.steps ?? 8} steps, {settings.fastModel?.useUpscaler !== false ? 'with upscaler (2-stage, recommended)' : 'native resolution (experimental)'}
                 </div>
               </div>
 
@@ -1012,6 +1222,88 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 <p className="text-xs text-zinc-400">
                   <span className="text-blue-400 font-medium">Tip:</span> Lower steps = faster but lower quality.
                   Higher steps = better quality but slower.
+                </p>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'loras' && (
+            <>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Film className="h-4 w-4 text-purple-400" />
+                    <h3 className="text-sm font-semibold text-white">LoRA Models</h3>
+                  </div>
+                  <button
+                    onClick={handleAddLora}
+                    className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-500 transition-colors"
+                  >
+                    + Add LoRA
+                  </button>
+                </div>
+
+                <p className="text-xs text-zinc-500">
+                  Add custom LoRA files (.safetensors) to apply during generation. LoRAs are applied on top of the base model.
+                </p>
+
+                {(!settings.userLoras || settings.userLoras.length === 0) ? (
+                  <div className="bg-zinc-800/50 rounded-lg p-6 text-center">
+                    <Film className="h-8 w-8 text-zinc-600 mx-auto mb-2" />
+                    <p className="text-sm text-zinc-500">No LoRAs added</p>
+                    <p className="text-xs text-zinc-600 mt-1">Click "Add LoRA" to load a .safetensors file</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {settings.userLoras.map((lora, index) => (
+                      <div key={index} className="bg-zinc-800/50 rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <button
+                              onClick={() => handleToggleLora(index)}
+                              className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                lora.enabled ? 'bg-purple-500' : 'bg-zinc-700'
+                              }`}
+                            >
+                              <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                lora.enabled ? 'translate-x-4' : 'translate-x-0'
+                              }`} />
+                            </button>
+                            <span className="text-xs text-zinc-300 truncate" title={lora.path}>
+                              {lora.path.split('/').pop() || lora.path}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleRemoveLora(index)}
+                            className="text-zinc-500 hover:text-red-400 transition-colors ml-2"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-zinc-500 w-16">Strength:</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="2"
+                            step="0.05"
+                            value={lora.strength}
+                            onChange={(e) => handleLoraStrengthChange(index, parseFloat(e.target.value))}
+                            className="flex-1 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                            disabled={!lora.enabled}
+                          />
+                          <span className="text-xs text-zinc-400 w-8 text-right">{lora.strength.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-zinc-800/30 rounded-lg p-3 mt-4">
+                <p className="text-xs text-zinc-400">
+                  <span className="text-purple-400 font-medium">Note:</span> Adding or changing LoRAs requires reloading the pipeline.
+                  The pipeline will be reloaded automatically on the next generation.
                 </p>
               </div>
             </>

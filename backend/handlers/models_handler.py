@@ -6,7 +6,10 @@ from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING
 
-from api_types import ModelFileStatus, ModelInfo, ModelsStatusResponse, TextEncoderStatus
+import logging
+import os
+
+from api_types import LinkModelsResponse, ModelFileStatus, ModelInfo, ModelsStatusResponse, TextEncoderStatus
 from handlers.base import StateHandlerBase, with_state_lock
 from runtime_config.model_download_specs import MODEL_FILE_ORDER, resolve_required_model_types
 from state.app_state_types import AppState, AvailableFiles
@@ -135,3 +138,40 @@ class ModelsHandler(StateHandlerBase):
             text_encoder_status=self.get_text_encoder_status(),
             use_local_text_encoder=settings.use_local_text_encoder,
         )
+
+    def link_models_from_directory(self, source_dir: str) -> LinkModelsResponse:
+        """Scan source_dir for known model files/folders and symlink them into models_dir."""
+        src = Path(source_dir)
+        if not src.is_dir():
+            return LinkModelsResponse(linked=[], notFound=[m for m in MODEL_FILE_ORDER])
+
+        logger = logging.getLogger(__name__)
+        linked: list[str] = []
+        not_found: list[str] = []
+
+        for model_type in MODEL_FILE_ORDER:
+            spec = self._config.spec_for(model_type)
+            candidate = src / spec.relative_path
+            dest = self._config.model_path(model_type)
+
+            if not candidate.exists():
+                not_found.append(model_type)
+                continue
+
+            if dest.exists() or dest.is_symlink():
+                logger.info("Model %s already exists at %s, skipping", model_type, dest)
+                linked.append(model_type)
+                continue
+
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(str(candidate.resolve()), str(dest))
+                logger.info("Symlinked %s -> %s", dest, candidate)
+                linked.append(model_type)
+            except OSError:
+                # Symlink not supported (e.g. cross-device on Windows) — skip
+                logger.warning("Failed to symlink %s, skipping", model_type, exc_info=True)
+                not_found.append(model_type)
+
+        self.refresh_available_files()
+        return LinkModelsResponse(linked=linked, notFound=not_found)

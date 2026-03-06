@@ -88,6 +88,8 @@ class AppHandler:
         self.state = AppState(
             available_files={
                 "checkpoint": None,
+                "checkpoint_full": None,
+                "distill_lora": None,
                 "upsampler": None,
                 "text_encoder": None,
                 "zit": None,

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 import torch
 
 from services.http_client.http_client import HTTPClient
-from services.services_utils import PromptInput, TensorOrNone, sync_device
+from services.services_utils import PromptInput, TensorOrNone, default_dtype_for_device, device_supports_fp8, sync_device
 from state.app_state_types import CachedTextEncoder, TextEncodingResult
 
 if TYPE_CHECKING:
@@ -89,7 +89,8 @@ class LTXTextEncoder:
                 finally:
                     self_model_ledger.device = saved_device
 
-                _quantize_linear_weights_fp8(te_state.cached_encoder)
+                if device_supports_fp8(self.device):
+                    _quantize_linear_weights_fp8(te_state.cached_encoder)
 
                 te_state.cached_encoder.to(self.device)
                 sync_device(self.device)
@@ -233,11 +234,12 @@ class LTXTextEncoder:
 
             embeddings = conditioning[0][0]
             video_dim = 4096
+            _dtype = default_dtype_for_device(self.device)
             if embeddings.shape[-1] > video_dim:
-                video_context = embeddings[..., :video_dim].contiguous().to(dtype=torch.bfloat16, device=self.device)
-                audio_context = embeddings[..., video_dim:].contiguous().to(dtype=torch.bfloat16, device=self.device)
+                video_context = embeddings[..., :video_dim].contiguous().to(dtype=_dtype, device=self.device)
+                audio_context = embeddings[..., video_dim:].contiguous().to(dtype=_dtype, device=self.device)
             else:
-                video_context = embeddings.contiguous().to(dtype=torch.bfloat16, device=self.device)
+                video_context = embeddings.contiguous().to(dtype=_dtype, device=self.device)
                 audio_context = None
 
             logger.info("Text encoded via API in %.1fs", time.time() - start)

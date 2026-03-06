@@ -63,6 +63,17 @@ def device_supports_fp8(device: str | torch.device | object | None) -> bool:
     return get_device_type(device) == "cuda"
 
 
+def default_dtype_for_device(device: str | torch.device | object | None) -> torch.dtype:
+    """Return float16 for MPS (bfloat16 causes artifacts), bfloat16 otherwise."""
+    if get_device_type(device) == "mps":
+        return torch.float16
+    return torch.bfloat16
+
+
+def is_mps_device(device: str | torch.device | object | None) -> bool:
+    return get_device_type(device) == "mps"
+
+
 def sync_device(device: str | torch.device | object | None) -> None:
     device_type = get_device_type(device)
     if device_type == "cuda":

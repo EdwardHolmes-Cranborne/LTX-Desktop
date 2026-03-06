@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 class FastVideoPipeline(Protocol):
-    pipeline_kind: ClassVar[Literal["fast"]]
+    pipeline_kind: ClassVar[Literal["fast", "pro"]]
 
     @staticmethod
     def create(
@@ -19,6 +19,8 @@ class FastVideoPipeline(Protocol):
         gemma_root: str | None,
         upsampler_path: str,
         device: torch.device,
+        distill_lora_path: str | None = None,
+        user_loras: list[tuple[str, float]] | None = None,
     ) -> "FastVideoPipeline":
         ...
 
@@ -32,6 +34,8 @@ class FastVideoPipeline(Protocol):
         frame_rate: float,
         images: list[ImageConditioningInput],
         output_path: str,
+        negative_prompt: str = "",
+        num_inference_steps: int | None = None,
     ) -> None:
         ...
 
