@@ -143,9 +143,10 @@ DEVICE = _get_device()
 if DEVICE.type == "mps":
     # Prevent silent precision loss in reductions on Metal.
     torch.backends.mps.allow_reduced_precision_reductions = False  # type: ignore[attr-defined]
-    # Use float16 on MPS — bfloat16 is poorly supported and causes artifacts.
-    DTYPE = torch.float16
-    logger.info("MPS detected: using float16 dtype, reduced-precision reductions disabled")
+    # Use float32 on MPS — bfloat16 is unsupported and float16 causes Metal matmul
+    # assertion failures on large matrices. float32 matches HunyuanImage-3.0 approach.
+    DTYPE = torch.float32
+    logger.info("MPS detected: using float32 dtype, reduced-precision reductions disabled")
 else:
     DTYPE = torch.bfloat16
 

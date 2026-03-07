@@ -22,7 +22,7 @@ interface GenerationProgress {
 }
 
 interface UseGenerationReturn extends GenerationState {
-  generate: (prompt: string, imagePath: string | null, settings: GenerationSettings, audioPath?: string | null) => Promise<void>
+  generate: (prompt: string, imagePath: string | null, settings: GenerationSettings, audioPath?: string | null, lastFrameImagePath?: string | null) => Promise<void>
   generateImage: (prompt: string, settings: GenerationSettings) => Promise<void>
   cancel: () => void
   reset: () => void
@@ -106,6 +106,7 @@ export function useGeneration(): UseGenerationReturn {
     imagePath: string | null,
     settings: GenerationSettings,
     audioPath?: string | null,
+    lastFrameImagePath?: string | null,
   ) => {
     const statusMsg = settings.model === 'pro'
       ? 'Loading Pro model & generating...'
@@ -143,6 +144,9 @@ export function useGeneration(): UseGenerationReturn {
       }
       if (imagePath) {
         body.imagePath = imagePath
+      }
+      if (lastFrameImagePath) {
+        body.lastFrameImagePath = lastFrameImagePath
       }
       if (audioPath) {
         body.audioPath = audioPath

@@ -309,6 +309,8 @@ function PromptBar({
   isGenerating,
   inputImage,
   onInputImageChange,
+  inputLastFrameImage,
+  onInputLastFrameImageChange,
   inputAudio,
   onInputAudioChange,
   settings,
@@ -329,6 +331,8 @@ function PromptBar({
   buttonIcon: React.ReactNode
   inputImage: string | null
   onInputImageChange: (url: string | null) => void
+  inputLastFrameImage: string | null
+  onInputLastFrameImageChange: (url: string | null) => void
   inputAudio: string | null
   onInputAudioChange: (url: string | null) => void
   settings: {
@@ -345,8 +349,10 @@ function PromptBar({
   shouldVideoGenerateWithLtxApi: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const lastFrameInputRef = useRef<HTMLInputElement>(null)
   const audioInputRef = useRef<HTMLInputElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [isLastFrameDragOver, setIsLastFrameDragOver] = useState(false)
   const [isAudioDragOver, setIsAudioDragOver] = useState(false)
   const isRetake = mode === 'retake'
   const LOCAL_MAX_DURATION: Record<string, number> = { '540p': 20, '720p': 10, '1080p': 5 }
@@ -427,6 +433,34 @@ function PromptBar({
     }
   }
   
+  const handleLastFrameDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsLastFrameDragOver(false)
+
+    const assetData = e.dataTransfer.getData('asset')
+    if (assetData) {
+      const asset = JSON.parse(assetData) as Asset
+      if (asset.type === 'image') {
+        onInputLastFrameImageChange(asset.url)
+      }
+    }
+  }
+
+  const handleLastFrameFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file && file.type.startsWith('image/')) {
+      const filePath = (file as any).path as string | undefined
+      if (filePath) {
+        const normalized = filePath.replace(/\\/g, '/')
+        const fileUrl = normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`
+        onInputLastFrameImageChange(fileUrl)
+      } else {
+        const url = URL.createObjectURL(file)
+        onInputLastFrameImageChange(url)
+      }
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !isGenerating && canGenerate) {
       e.preventDefault()
@@ -438,16 +472,17 @@ function PromptBar({
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-visible">
       {/* Top row: Image ref | Prompt | Generate */}
       <div className="flex items-start">
-        {/* Input image drop zone — video mode only (I2V) */}
+        {/* First frame image drop zone — video mode only (I2V) */}
         {mode === 'video' && !isRetake && (
           <div
-            className={`relative w-10 h-10 mx-2 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
-              isDragOver ? 'border-blue-500 bg-blue-500/10' : 'border-zinc-700 hover:border-zinc-500'
+            className={`relative w-10 h-10 ml-2 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
+              isDragOver ? 'border-blue-500 bg-blue-500/10' : inputImage ? 'border-blue-600' : 'border-zinc-700 hover:border-zinc-500'
             }`}
             onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
             onDragLeave={() => setIsDragOver(false)}
             onDrop={handleDrop}
             onClick={() => inputRef.current?.click()}
+            title={inputImage ? 'First frame image — click to change' : 'Set first frame image'}
           >
             {inputImage ? (
               <>
@@ -460,7 +495,10 @@ function PromptBar({
                 </button>
               </>
             ) : (
-              <Image className="h-4 w-4 text-zinc-500" />
+              <div className="flex flex-col items-center">
+                <Image className="h-4 w-4 text-zinc-500" />
+                <span className="text-[7px] text-zinc-600 mt-0.5">1st</span>
+              </div>
             )}
             <input
               ref={inputRef}
@@ -472,10 +510,48 @@ function PromptBar({
           </div>
         )}
 
+        {/* Last frame image drop zone — video mode only */}
+        {mode === 'video' && !isRetake && (
+          <div
+            className={`relative w-10 h-10 ml-1 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
+              isLastFrameDragOver ? 'border-purple-500 bg-purple-500/10' : inputLastFrameImage ? 'border-purple-600' : 'border-zinc-700 hover:border-zinc-500'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setIsLastFrameDragOver(true) }}
+            onDragLeave={() => setIsLastFrameDragOver(false)}
+            onDrop={handleLastFrameDrop}
+            onClick={() => lastFrameInputRef.current?.click()}
+            title={inputLastFrameImage ? 'Last frame image — click to change' : 'Set last frame image'}
+          >
+            {inputLastFrameImage ? (
+              <>
+                <img src={inputLastFrameImage} alt="" className="w-full h-full object-cover rounded-md" />
+                <button
+                  onClick={(e) => { e.stopPropagation(); onInputLastFrameImageChange(null) }}
+                  className="absolute -top-1 -right-1 p-0.5 rounded-full bg-zinc-800 text-zinc-400 hover:text-white z-10"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center">
+                <Image className="h-4 w-4 text-zinc-500" />
+                <span className="text-[7px] text-zinc-600 mt-0.5">last</span>
+              </div>
+            )}
+            <input
+              ref={lastFrameInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleLastFrameFileSelect}
+              className="hidden"
+            />
+          </div>
+        )}
+
         {/* Audio drop zone — only in video mode */}
         {mode === 'video' && !isRetake && (
           <div
-            className={`relative w-10 h-10 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
+            className={`relative w-10 h-10 ml-1 mr-1 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
               isAudioDragOver ? 'border-emerald-500 bg-emerald-500/10' : inputAudio ? 'border-emerald-600' : 'border-zinc-700 hover:border-zinc-500'
             }`}
             onDragOver={(e) => { e.preventDefault(); setIsAudioDragOver(true) }}
@@ -785,6 +861,7 @@ export function GenSpace() {
   const [mode, setMode] = useState<'image' | 'video' | 'retake'>('video')
   const [prompt, setPrompt] = useState('')
   const [inputImage, setInputImage] = useState<string | null>(null)
+  const [inputLastFrameImage, setInputLastFrameImage] = useState<string | null>(null)
   const [inputAudio, setInputAudio] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
@@ -1110,6 +1187,7 @@ export function GenSpace() {
       // Generate video (t2v if no image/audio, i2v if image, a2v if audio)
       // Extract filesystem path from the file:// URL for the backend
       const imagePath = inputImage ? fileUrlToPath(inputImage) : null
+      const lastFrameImagePath = inputLastFrameImage ? fileUrlToPath(inputLastFrameImage) : null
       const audioPath = inputAudio ? fileUrlToPath(inputAudio) : null
       const videoSettings = applyForcedVideoSettings(settings)
       if (audioPath) videoSettings.model = 'pro'
@@ -1130,6 +1208,7 @@ export function GenSpace() {
           imageSteps: 4,
         },
         audioPath,
+        lastFrameImagePath,
       )
     }
   }
@@ -1385,6 +1464,8 @@ export function GenSpace() {
           buttonIcon={promptButtonIcon}
           inputImage={inputImage}
           onInputImageChange={setInputImage}
+          inputLastFrameImage={inputLastFrameImage}
+          onInputLastFrameImageChange={setInputLastFrameImage}
           inputAudio={inputAudio}
           onInputAudioChange={setInputAudio}
           settings={settings}

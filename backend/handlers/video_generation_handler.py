@@ -223,7 +223,8 @@ class VideoGenerationHandler(StateHandlerBase):
         if last_frame_image is not None:
             temp_last_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
             last_frame_image.save(temp_last_image_path)
-            images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=num_frames - 1, strength=1.0))
+            last_latent_idx = (num_frames - 1) // 8
+            images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=last_latent_idx, strength=1.0))
 
         output_path = self._make_output_path()
 
@@ -342,7 +343,8 @@ class VideoGenerationHandler(StateHandlerBase):
             if last_frame_image is not None:
                 temp_last_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
                 last_frame_image.save(temp_last_image_path)
-                images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=num_frames - 1, strength=1.0))
+                last_latent_idx = (num_frames - 1) // 8
+                images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=last_latent_idx, strength=1.0))
 
             output_path = self._make_output_path()
 
