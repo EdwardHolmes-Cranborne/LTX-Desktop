@@ -22,7 +22,7 @@ interface GenerationProgress {
 }
 
 interface UseGenerationReturn extends GenerationState {
-  generate: (prompt: string, imagePath: string | null, settings: GenerationSettings, audioPath?: string | null, lastFrameImagePath?: string | null) => Promise<void>
+  generate: (prompt: string, imagePath: string | null, settings: GenerationSettings, audioPath?: string | null, lastFrameImagePath?: string | null, videoPath?: string | null) => Promise<void>
   generateImage: (prompt: string, settings: GenerationSettings) => Promise<void>
   cancel: () => void
   reset: () => void
@@ -107,6 +107,7 @@ export function useGeneration(): UseGenerationReturn {
     settings: GenerationSettings,
     audioPath?: string | null,
     lastFrameImagePath?: string | null,
+    videoPath?: string | null,
   ) => {
     const statusMsg = settings.model === 'pro'
       ? 'Loading Pro model & generating...'
@@ -151,6 +152,17 @@ export function useGeneration(): UseGenerationReturn {
       if (audioPath) {
         body.audioPath = audioPath
       }
+      if (videoPath) {
+        body.videoPath = videoPath
+      }
+      // Conditioning params
+      if (settings.imageStrength !== undefined) body.imageStrength = settings.imageStrength
+      if (settings.lastFrameStrength !== undefined) body.lastFrameStrength = settings.lastFrameStrength
+      if (settings.v2vStrength !== undefined) body.v2vStrength = settings.v2vStrength
+      if (settings.v2vKeyframes !== undefined) body.v2vKeyframes = settings.v2vKeyframes
+      if (settings.cfgScale !== undefined) body.cfgScale = settings.cfgScale
+      if (settings.negativePrompt) body.negativePrompt = settings.negativePrompt
+      if (settings.audioStartOffset !== undefined) body.audioStartOffset = settings.audioStartOffset
 
       // Poll for real progress from backend with time-based interpolation
       let lastPhase = ''
@@ -174,10 +186,16 @@ export function useGeneration(): UseGenerationReturn {
               if (lastPhase !== 'inference') {
                 inferenceStartTime = Date.now()
               }
-              const elapsed = (Date.now() - inferenceStartTime) / 1000
-              // Interpolate from 15% to 95% based on estimated time
-              const inferenceProgress = Math.min(elapsed / estimatedInferenceTime, 0.95)
-              displayProgress = 15 + Math.floor(inferenceProgress * 80)
+              // Use real step info when available, fall back to time-based
+              if (data.currentStep !== null && data.totalSteps !== null && data.totalSteps > 0) {
+                const stepProgress = data.currentStep / data.totalSteps
+                displayProgress = 15 + Math.floor(stepProgress * 80)
+                statusMessage = `Generating... (step ${data.currentStep}/${data.totalSteps})`
+              } else {
+                const elapsed = (Date.now() - inferenceStartTime) / 1000
+                const inferenceProgress = Math.min(elapsed / estimatedInferenceTime, 0.95)
+                displayProgress = 15 + Math.floor(inferenceProgress * 80)
+              }
             }
 
             // Keep API/local completion as a terminal response state, not polling state.

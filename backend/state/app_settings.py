@@ -92,6 +92,8 @@ class AppSettings(SettingsBaseModel):
     prompt_cache_size: int = 100
     prompt_enhancer_enabled_t2v: bool = True
     prompt_enhancer_enabled_i2v: bool = False
+    prompt_enhancer_endpoint: str = "http://localhost:1234/v1"
+    prompt_enhancer_model: str = ""
     gemini_api_key: str = ""
     seed_locked: bool = False
     locked_seed: int = 42
@@ -164,6 +166,8 @@ class SettingsResponse(SettingsBaseModel):
     prompt_cache_size: int = 100
     prompt_enhancer_enabled_t2v: bool = True
     prompt_enhancer_enabled_i2v: bool = False
+    prompt_enhancer_endpoint: str = "http://localhost:1234/v1"
+    prompt_enhancer_model: str = ""
     has_gemini_api_key: bool = False
     seed_locked: bool = False
     locked_seed: int = 42

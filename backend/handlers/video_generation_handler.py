@@ -25,7 +25,9 @@ from server_utils.media_validation import (
     validate_audio_file,
     validate_image_file,
 )
+from services.http_client.http_client import HTTPClient
 from services.interfaces import LTXAPIClient
+from services.prompt_enhancer.prompt_enhancer import enhance_prompt
 from state.app_state_types import AppState
 from state.app_settings import should_video_generate_with_ltx_api
 
@@ -63,6 +65,7 @@ class VideoGenerationHandler(StateHandlerBase):
         pipelines_handler: PipelinesHandler,
         text_handler: TextHandler,
         ltx_api_client: LTXAPIClient,
+        http_client: HTTPClient,
         outputs_dir: Path,
         config: RuntimeConfig,
         camera_motion_prompts: dict[str, str],
@@ -73,6 +76,7 @@ class VideoGenerationHandler(StateHandlerBase):
         self._pipelines = pipelines_handler
         self._text = text_handler
         self._ltx_api_client = ltx_api_client
+        self._http = http_client
         self._outputs_dir = outputs_dir
         self._config = config
         self._camera_motion_prompts = camera_motion_prompts
@@ -121,19 +125,38 @@ class VideoGenerationHandler(StateHandlerBase):
             case "16:9":
                 width, height = get_16_9_size(resolution)
 
+        # Round to 64-pixel alignment here so conditioning images match generation dims
+        height = round(height / 64) * 64
+        width = round(width / 64) * 64
+
         num_frames = self._compute_num_frames(duration, fps)
+
+        # V2V: extract frames from input video as conditioning
+        v2v_frames: list[Image.Image] | None = None
+        video_path = normalize_optional_path(req.videoPath)
+        if video_path:
+            v2v_frames = self._extract_v2v_frames(
+                str(video_path), num_frames, width, height, max_keyframes=req.v2vKeyframes,
+            )
+            logger.info("V2V: extracted %d conditioning frames from %s", len(v2v_frames), video_path)
 
         image = None
         image_path = normalize_optional_path(req.imagePath)
         if image_path:
             image = self._prepare_image(image_path, width, height)
             logger.info("Image: %s -> %sx%s", image_path, width, height)
+        elif v2v_frames:
+            # Use the first V2V frame as the primary I2V conditioning image
+            image = v2v_frames[0]
 
         last_frame_image = None
         last_frame_image_path = normalize_optional_path(req.lastFrameImagePath)
         if last_frame_image_path:
             last_frame_image = self._prepare_image(last_frame_image_path, width, height)
             logger.info("Last frame image: %s -> %sx%s", last_frame_image_path, width, height)
+        elif v2v_frames and len(v2v_frames) > 1:
+            # Use the last V2V frame as the last frame conditioning
+            last_frame_image = v2v_frames[-1]
 
         generation_id = self._make_generation_id()
         seed = self._resolve_seed()
@@ -147,6 +170,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 prompt=req.prompt,
                 image=image,
                 last_frame_image=last_frame_image,
+                v2v_frames=v2v_frames,
                 height=height,
                 width=width,
                 num_frames=num_frames,
@@ -155,6 +179,10 @@ class VideoGenerationHandler(StateHandlerBase):
                 camera_motion=req.cameraMotion,
                 negative_prompt=req.negativePrompt,
                 model_type=pipeline_model_type,
+                image_strength=req.imageStrength,
+                last_frame_strength=req.lastFrameStrength,
+                v2v_strength=req.v2vStrength,
+                cfg_scale=req.cfgScale,
             )
 
             self._generation.complete_generation(output_path)
@@ -181,6 +209,11 @@ class VideoGenerationHandler(StateHandlerBase):
         negative_prompt: str,
         model_type: str = "fast",
         last_frame_image: Image.Image | None = None,
+        v2v_frames: list[Image.Image] | None = None,
+        image_strength: float = 1.0,
+        last_frame_strength: float = 1.0,
+        v2v_strength: float = 0.8,
+        cfg_scale: float = 1.0,
     ) -> str:
         from services.interfaces import VideoPipelineModelType
 
@@ -213,18 +246,50 @@ class VideoGenerationHandler(StateHandlerBase):
 
         enhanced_prompt = prompt + self._camera_motion_prompts.get(camera_motion, "")
 
+        # Local prompt enhancement via OpenAI-compatible endpoint
+        should_enhance = (
+            (image is not None and settings.prompt_enhancer_enabled_i2v)
+            or (image is None and settings.prompt_enhancer_enabled_t2v)
+        )
+        if should_enhance and settings.prompt_enhancer_endpoint and settings.prompt_enhancer_model:
+            t_enhance_start = time.perf_counter()
+            enhanced_result = enhance_prompt(
+                http=self._http,
+                endpoint=settings.prompt_enhancer_endpoint,
+                model=settings.prompt_enhancer_model,
+                prompt=enhanced_prompt,
+            )
+            if enhanced_result:
+                enhanced_prompt = enhanced_result
+            t_enhance_end = time.perf_counter()
+            logger.info("[%s] Prompt enhancement: %.2fs", gen_mode, t_enhance_end - t_enhance_start)
+
         images: list[ImageConditioningInput] = []
         temp_image_path: str | None = None
         if image is not None:
             temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
             image.save(temp_image_path)
-            images.append(ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0))
+            images.append(ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=image_strength))
         temp_last_image_path: str | None = None
         if last_frame_image is not None:
             temp_last_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
             last_frame_image.save(temp_last_image_path)
             last_latent_idx = (num_frames - 1) // 8
-            images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=last_latent_idx, strength=1.0))
+            images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=last_latent_idx, strength=last_frame_strength))
+
+        # V2V intermediate keyframes (skip first and last, already handled above)
+        v2v_temp_paths: list[str] = []
+        if v2v_frames and len(v2v_frames) > 2:
+            total_latent_frames = (num_frames - 1) // 8 + 1
+            for i, frame in enumerate(v2v_frames[1:-1], start=1):
+                # Evenly distribute intermediate frames across latent space
+                latent_idx = round(i * (total_latent_frames - 1) / (len(v2v_frames) - 1))
+                if latent_idx == 0 or latent_idx == (total_latent_frames - 1):
+                    continue  # Skip if it collides with first/last
+                tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+                frame.save(tmp)
+                v2v_temp_paths.append(tmp)
+                images.append(ImageConditioningInput(path=tmp, frame_idx=latent_idx, strength=v2v_strength))
 
         output_path = self._make_output_path()
 
@@ -294,6 +359,46 @@ class VideoGenerationHandler(StateHandlerBase):
                 os.unlink(temp_image_path)
             if temp_last_image_path and os.path.exists(temp_last_image_path):
                 os.unlink(temp_last_image_path)
+            for p in v2v_temp_paths:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def _extract_v2v_frames(
+        self, video_path: str, num_frames: int, width: int, height: int,
+        max_keyframes: int = 16,
+    ) -> list[Image.Image]:
+        """Extract evenly-spaced frames from an input video for V2V conditioning."""
+        import subprocess
+        import json as _json
+
+        # Get video duration via ffprobe
+        probe_cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", video_path,
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+        probe_data = _json.loads(probe_result.stdout)
+        duration = float(probe_data["format"]["duration"])
+
+        # Determine how many frames to extract — one per latent frame, capped
+        total_latent_frames = (num_frames - 1) // 8 + 1
+        # Extract at most total_latent_frames, but cap at user-defined maximum
+        n_extract = min(total_latent_frames, max(max_keyframes, 2))
+
+        frames: list[Image.Image] = []
+        for i in range(n_extract):
+            t = (i / max(n_extract - 1, 1)) * duration
+            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+            cmd = [
+                "ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", video_path,
+                "-vframes", "1", "-s", f"{width}x{height}", tmp,
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=30)
+            if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+                frames.append(Image.open(tmp).copy())
+            os.unlink(tmp)
+
+        return frames
 
     def _generate_a2v(
         self, req: GenerateVideoRequest, duration: int, fps: int, *, audio_path: str
@@ -339,12 +444,12 @@ class VideoGenerationHandler(StateHandlerBase):
             if image is not None:
                 temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
                 image.save(temp_image_path)
-                images.append(ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=1.0))
+                images.append(ImageConditioningInput(path=temp_image_path, frame_idx=0, strength=req.imageStrength))
             if last_frame_image is not None:
                 temp_last_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
                 last_frame_image.save(temp_last_image_path)
                 last_latent_idx = (num_frames - 1) // 8
-                images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=last_latent_idx, strength=1.0))
+                images.append(ImageConditioningInput(path=temp_last_image_path, frame_idx=last_latent_idx, strength=req.lastFrameStrength))
 
             output_path = self._make_output_path()
 
@@ -373,7 +478,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 num_inference_steps=total_steps,
                 images=images,
                 audio_path=audio_path_str,
-                audio_start_time=0.0,
+                audio_start_time=req.audioStartOffset,
                 audio_max_duration=None,
                 output_path=str(output_path),
             )

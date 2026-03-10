@@ -30,6 +30,8 @@ export interface AppSettings {
   promptCacheSize: number
   promptEnhancerEnabledT2V: boolean
   promptEnhancerEnabledI2V: boolean
+  promptEnhancerEndpoint: string
+  promptEnhancerModel: string
   seedLocked: boolean
   lockedSeed: number
 }
@@ -48,6 +50,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   promptCacheSize: 1,
   promptEnhancerEnabledT2V: false,
   promptEnhancerEnabledI2V: false,
+  promptEnhancerEndpoint: 'http://localhost:1234/v1',
+  promptEnhancerModel: '',
   seedLocked: false,
   lockedSeed: 42,
 }
@@ -96,6 +100,8 @@ function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
     promptCacheSize: data.promptCacheSize ?? DEFAULT_APP_SETTINGS.promptCacheSize,
     promptEnhancerEnabledT2V: data.promptEnhancerEnabledT2V ?? DEFAULT_APP_SETTINGS.promptEnhancerEnabledT2V,
     promptEnhancerEnabledI2V: data.promptEnhancerEnabledI2V ?? DEFAULT_APP_SETTINGS.promptEnhancerEnabledI2V,
+    promptEnhancerEndpoint: data.promptEnhancerEndpoint ?? DEFAULT_APP_SETTINGS.promptEnhancerEndpoint,
+    promptEnhancerModel: data.promptEnhancerModel ?? DEFAULT_APP_SETTINGS.promptEnhancerModel,
     seedLocked: data.seedLocked ?? DEFAULT_APP_SETTINGS.seedLocked,
     lockedSeed: data.lockedSeed ?? DEFAULT_APP_SETTINGS.lockedSeed,
   }

@@ -1318,29 +1318,43 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 </div>
 
                 <p className="text-xs text-zinc-500 leading-relaxed">
-                  Automatically enhances your prompts via the LTX API with rich visual details, sound descriptions,
-                  and motion cues to help generate higher quality videos. Control independently for each generation type.
+                  Automatically enhances your prompts with rich visual details, motion cues, and atmosphere
+                  using a local LLM via an OpenAI-compatible endpoint (e.g. LM Studio).
                 </p>
 
-                {!settings.hasLtxApiKey ? (
-                  <div className="space-y-4 mt-2">
-                    <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4 space-y-3">
-                      <div className="flex items-start gap-2.5">
-                        <AlertCircle className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
-                        <div className="space-y-2">
-                          <p className="text-sm text-amber-300 font-medium">LTX API key required</p>
-                          <p className="text-xs text-zinc-400 leading-relaxed">
-                            Prompt enhancement runs server-side on the LTX API. To use this feature, you need to configure
-                            an API key in the API Keys tab.
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setActiveTab('apiKeys')}
-                        className="w-full mt-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
-                      >
-                        Set API Key
-                      </button>
+                {/* Endpoint URL */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-400">Endpoint URL</label>
+                  <input
+                    type="text"
+                    value={settings.promptEnhancerEndpoint}
+                    onChange={(e) => onSettingsChange({ ...settings, promptEnhancerEndpoint: e.target.value })}
+                    placeholder="http://localhost:1234/v1"
+                    className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50"
+                  />
+                  <p className="text-[10px] text-zinc-600">OpenAI-compatible chat completions endpoint (e.g. LM Studio, Ollama, vLLM)</p>
+                </div>
+
+                {/* Model Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-400">Model Name</label>
+                  <input
+                    type="text"
+                    value={settings.promptEnhancerModel}
+                    onChange={(e) => onSettingsChange({ ...settings, promptEnhancerModel: e.target.value })}
+                    placeholder="e.g. qwen2.5-7b-instruct"
+                    className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50"
+                  />
+                  <p className="text-[10px] text-zinc-600">Model identifier as shown in your LLM server</p>
+                </div>
+
+                {!settings.promptEnhancerEndpoint || !settings.promptEnhancerModel ? (
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-3.5 w-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs text-zinc-400">
+                        Configure both the endpoint URL and model name to enable prompt enhancement.
+                      </p>
                     </div>
                   </div>
                 ) : (
@@ -1376,9 +1390,9 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       <div className="flex items-center gap-3">
                         <span className="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">I2V</span>
                         <div>
-                          <span className="text-sm text-zinc-200">Image-to-Video</span>
+                          <span className="text-sm text-zinc-200">Image-to-Video / Video-to-Video</span>
                           <p className="text-[10px] text-zinc-500 mt-0.5">
-                            {settings.promptEnhancerEnabledI2V ? 'Prompts will be enhanced before I2V generation' : 'I2V prompts used as-is'}
+                            {settings.promptEnhancerEnabledI2V ? 'Prompts will be enhanced before I2V/V2V generation' : 'I2V/V2V prompts used as-is'}
                           </p>
                         </div>
                       </div>
