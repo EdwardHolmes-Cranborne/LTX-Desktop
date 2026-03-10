@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 import torch
 
 from api_types import ImageConditioningInput
-from services.services_utils import AudioOrNone, TilingConfigType, device_supports_fp8, sync_device
+from services.services_utils import AudioOrNone, TilingConfigType, default_dtype_for_device, device_supports_fp8, is_mps_device, sync_device
 
 if TYPE_CHECKING:
     from ltx_core.components.guiders import MultiModalGuiderParams
@@ -69,7 +69,7 @@ class DistilledNativePipeline:
             device = get_device()
 
         self.device = device
-        self.dtype = torch.bfloat16
+        self.dtype = default_dtype_for_device(device)
 
         from ltx_core.quantization import QuantizationPolicy
 
@@ -114,7 +114,7 @@ class DistilledNativePipeline:
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
         stepper = EulerDiffusionStep()
-        dtype = torch.bfloat16
+        dtype = self.dtype
 
         text_encoder = self.model_ledger.text_encoder()
         context_p = encode_text(text_encoder, prompts=[prompt])[0]
@@ -173,9 +173,17 @@ class DistilledNativePipeline:
         del video_encoder
         cleanup_memory()
 
-        decoded_video = vae_decode_video(video_state.latent, self.model_ledger.video_decoder(), tiling_config)
+        # On MPS, run VAE decode in float32 — fp16 conv layers produce artifacts.
+        if is_mps_device(self.device):
+            video_latent = video_state.latent.to(torch.float32)
+            audio_latent = audio_state.latent.to(torch.float32)
+        else:
+            video_latent = video_state.latent
+            audio_latent = audio_state.latent
+
+        decoded_video = vae_decode_video(video_latent, self.model_ledger.video_decoder(), tiling_config)
         decoded_audio = vae_decode_audio(
-            audio_state.latent,
+            audio_latent,
             self.model_ledger.audio_decoder(),
             self.model_ledger.vocoder(),
         )

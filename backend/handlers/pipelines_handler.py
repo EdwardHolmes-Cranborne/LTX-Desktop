@@ -117,18 +117,47 @@ class PipelinesHandler(StateHandlerBase):
             logger.warning("Failed to compile transformer: %s", exc, exc_info=True)
         return state
 
+    def _resolve_checkpoint_path(self) -> str:
+        """Return best available checkpoint: prefer full model, fall back to distilled."""
+        full_path = self._config.model_path("checkpoint_full")
+        if full_path.exists():
+            return str(full_path)
+        return str(self._config.model_path("checkpoint"))
+
+    def _resolve_distill_lora_path(self) -> str | None:
+        """Return distill LoRA path if available."""
+        lora_path = self._config.model_path("distill_lora")
+        if lora_path.exists():
+            return str(lora_path)
+        return None
+
+    def _get_user_loras(self) -> list[tuple[str, float]]:
+        """Return enabled user LoRAs as (path, strength) tuples."""
+        entries = self.state.app_settings.user_loras
+        return [(e.path, e.strength) for e in entries if e.enabled and e.path]
+
     def _create_video_pipeline(self, model_type: VideoPipelineModelType) -> VideoPipelineState:
         gemma_root = self._text_handler.resolve_gemma_root()
-
-        checkpoint_path = str(self._config.model_path("checkpoint"))
         upsampler_path = str(self._config.model_path("upsampler"))
+        checkpoint_path = self._resolve_checkpoint_path()
+        distill_lora = self._resolve_distill_lora_path()
+        user_loras = self._get_user_loras()
 
-        pipeline = self._fast_video_pipeline_class.create(
-            checkpoint_path,
-            gemma_root,
-            upsampler_path,
-            self._device,
-        )
+        pipeline: FastVideoPipeline
+        if model_type == "pro":
+            if distill_lora is None:
+                raise RuntimeError("Distill LoRA not found. Pro mode requires the distillation LoRA for stage 2 upsampling.")
+            from services.fast_video_pipeline.ltx_pro_video_pipeline import LTXProVideoPipeline
+            pipeline = LTXProVideoPipeline.create(
+                checkpoint_path, gemma_root, upsampler_path, distill_lora, self._device,
+                user_loras=user_loras or None,
+            )
+        else:
+            pipeline = self._fast_video_pipeline_class.create(
+                checkpoint_path, gemma_root, upsampler_path, self._device,
+                distill_lora_path=distill_lora,
+                user_loras=user_loras or None,
+            )
 
         state = VideoPipelineState(
             pipeline=pipeline,

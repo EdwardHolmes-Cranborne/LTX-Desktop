@@ -157,7 +157,7 @@ class DownloadProgressResponse(BaseModel):
     filesCompleted: int
     totalFiles: int
     error: str | None
-    speedMbps: int
+    speedMbps: float
 
 
 class IcLoraModel(BaseModel):
@@ -252,8 +252,17 @@ class GenerateVideoRequest(BaseModel):
     fps: str = "24"
     audio: str = "false"
     imagePath: str | None = None
+    lastFrameImagePath: str | None = None
     audioPath: str | None = None
+    videoPath: str | None = None
     aspectRatio: Literal["16:9", "9:16"] = "16:9"
+    # Conditioning params
+    imageStrength: float = 1.0
+    lastFrameStrength: float = 1.0
+    v2vStrength: float = 0.8
+    v2vKeyframes: int = 16
+    cfgScale: float = 1.0
+    audioStartOffset: float = 0.0
 
 
 class GenerateImageRequest(BaseModel):
@@ -266,6 +275,15 @@ class GenerateImageRequest(BaseModel):
 
 class ModelDownloadRequest(BaseModel):
     skipTextEncoder: bool = False
+
+
+class LinkModelsRequest(BaseModel):
+    sourceDir: str
+
+
+class LinkModelsResponse(BaseModel):
+    linked: list[str]
+    notFound: list[str]
 
 
 class SuggestGapPromptRequest(BaseModel):

@@ -485,8 +485,10 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
         gemma_root: str | None,
         upsampler_path: str,
         device: str | object,
+        distill_lora_path: str | None = None,
+        user_loras: list[tuple[str, float]] | None = None,
     ) -> "FakeFastVideoPipeline":
-        del checkpoint_path, gemma_root, upsampler_path, device
+        del checkpoint_path, gemma_root, upsampler_path, device, distill_lora_path, user_loras
         pipeline = FakeFastVideoPipeline._singleton
         if pipeline is None:
             raise RuntimeError("FakeFastVideoPipeline singleton is not bound")
@@ -502,6 +504,8 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
         frame_rate: float,
         images: list[ImageConditioningInput],
         output_path: str,
+        negative_prompt: str = "",
+        num_inference_steps: int | None = None,
     ) -> None:
         self._record_generate(
             {

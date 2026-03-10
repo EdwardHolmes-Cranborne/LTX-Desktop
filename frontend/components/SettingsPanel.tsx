@@ -20,6 +20,14 @@ export interface GenerationSettings {
   imageAspectRatio: string
   imageSteps: number
   variations?: number  // Number of image variations to generate
+  // Conditioning params (set via right-click on media inputs)
+  imageStrength?: number
+  lastFrameStrength?: number
+  v2vStrength?: number
+  v2vKeyframes?: number
+  cfgScale?: number
+  negativePrompt?: string
+  audioStartOffset?: number
 }
 
 interface SettingsPanelProps {

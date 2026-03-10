@@ -186,15 +186,6 @@ function AppContent() {
     return payload.all_downloaded === true
   }, [])
 
-  const handleMissingModelsComplete = useCallback(async () => {
-    const allDownloaded = await areRequiredModelsDownloaded()
-    if (!allDownloaded) {
-      throw new Error('Required models are still missing. Please finish downloading before continuing.')
-    }
-    await handleFirstRunComplete()
-    setRequiredModelsGate('ready')
-  }, [areRequiredModelsDownloaded, handleFirstRunComplete])
-
   useEffect(() => {
     if (!shouldAutoFinalizeForcedFirstRun) return
     void handleFirstRunComplete().catch(() => {
@@ -212,27 +203,8 @@ function AppContent() {
       return
     }
 
-    let cancelled = false
-    setRequiredModelsGate('checking')
-
-    const checkRequiredModels = async () => {
-      try {
-        const allDownloaded = await areRequiredModelsDownloaded()
-        if (cancelled) return
-        setRequiredModelsGate(allDownloaded ? 'ready' : 'missing')
-      } catch (e) {
-        logger.error(`Failed to check required model status: ${e}`)
-        if (cancelled) return
-        // Do not block app launch on transient status-check failures.
-        setRequiredModelsGate('ready')
-      }
-    }
-
-    void checkRequiredModels()
-
-    return () => {
-      cancelled = true
-    }
+    // Don't block app launch for missing models — user can download from Settings.
+    setRequiredModelsGate('ready')
   }, [
     areRequiredModelsDownloaded,
     backendLoading,
@@ -419,9 +391,6 @@ function AppContent() {
     return <LaunchGate showLicenseStep={false} onComplete={handleFirstRunComplete} />
   }
 
-  if (requiredModelsGate === 'missing') {
-    return <LaunchGate showLicenseStep={false} onComplete={handleMissingModelsComplete} />
-  }
 
   const renderView = () => {
     switch (currentView) {

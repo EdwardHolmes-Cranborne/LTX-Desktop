@@ -15,6 +15,7 @@ from state.app_state_types import ModelFileType
 @dataclass
 class RuntimeConfig:
     device: torch.device
+    dtype: torch.dtype
     models_dir: Path
     model_download_specs: Mapping[ModelFileType, ModelFileDownloadSpec]
     required_model_types: frozenset[ModelFileType]

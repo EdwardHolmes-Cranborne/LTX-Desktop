@@ -3,7 +3,7 @@ import {
   Trash2, Download, Image, Video, X,
   Heart, Film, Volume2, VolumeX, Sparkles,
   Clock, Monitor, ChevronUp, Scissors, Music,
-  ChevronLeft, ChevronRight, Copy, Check
+  ChevronLeft, ChevronRight, Copy, Check, SlidersHorizontal
 } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import type { GenSpaceRetakeSource } from '../contexts/ProjectContext'
@@ -300,6 +300,164 @@ function AspectIcon({ className }: { className?: string }) {
 
 // Prompt bar component matching the design
 // Two-row layout: prompt row on top, settings row below
+// Conditioning params for media inputs (right-click popover)
+interface ConditioningParams {
+  imageStrength: number
+  lastFrameStrength: number
+  v2vStrength: number
+  v2vKeyframes: number
+  cfgScale: number
+  negativePrompt: string
+  audioStartOffset: number
+}
+
+const DEFAULT_CONDITIONING: ConditioningParams = {
+  imageStrength: 1.0,
+  lastFrameStrength: 1.0,
+  v2vStrength: 0.8,
+  v2vKeyframes: 16,
+  cfgScale: 1.0,
+  negativePrompt: '',
+  audioStartOffset: 0,
+}
+
+// Popover that appears on right-click of a media input zone
+function MediaSettingsPopover({
+  type,
+  position,
+  conditioning,
+  onConditioningChange,
+  onClose,
+}: {
+  type: 'image' | 'lastFrame' | 'video' | 'audio'
+  position: { x: number; y: number }
+  conditioning: ConditioningParams
+  onConditioningChange: (c: Partial<ConditioningParams>) => void
+  onClose: () => void
+}) {
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [onClose])
+
+  return (
+    <div
+      ref={popoverRef}
+      className="fixed z-50 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-3 w-64"
+      style={{ left: position.x, top: position.y }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+          <SlidersHorizontal className="h-3 w-3" />
+          {type === 'image' ? 'First Frame Settings' : type === 'lastFrame' ? 'Last Frame Settings' : type === 'video' ? 'V2V Settings' : 'Audio Settings'}
+        </span>
+        <button onClick={onClose} className="text-zinc-500 hover:text-white"><X className="h-3 w-3" /></button>
+      </div>
+
+      {/* Image / Last Frame: strength slider */}
+      {(type === 'image' || type === 'lastFrame') && (
+        <div className="space-y-2">
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Conditioning Strength</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min="0" max="1" step="0.05"
+              value={type === 'image' ? conditioning.imageStrength : conditioning.lastFrameStrength}
+              onChange={(e) => onConditioningChange(
+                type === 'image'
+                  ? { imageStrength: parseFloat(e.target.value) }
+                  : { lastFrameStrength: parseFloat(e.target.value) }
+              )}
+              className="flex-1 h-1 accent-blue-500"
+            />
+            <span className="text-xs text-zinc-400 w-8 text-right">
+              {(type === 'image' ? conditioning.imageStrength : conditioning.lastFrameStrength).toFixed(2)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Video (V2V): strength + keyframes */}
+      {type === 'video' && (
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Conditioning Strength</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="range" min="0" max="1" step="0.05"
+                value={conditioning.v2vStrength}
+                onChange={(e) => onConditioningChange({ v2vStrength: parseFloat(e.target.value) })}
+                className="flex-1 h-1 accent-orange-500"
+              />
+              <span className="text-xs text-zinc-400 w-8 text-right">{conditioning.v2vStrength.toFixed(2)}</span>
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Max Keyframes</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="range" min="2" max="32" step="1"
+                value={conditioning.v2vKeyframes}
+                onChange={(e) => onConditioningChange({ v2vKeyframes: parseInt(e.target.value) })}
+                className="flex-1 h-1 accent-orange-500"
+              />
+              <span className="text-xs text-zinc-400 w-8 text-right">{conditioning.v2vKeyframes}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Audio: start offset */}
+      {type === 'audio' && (
+        <div className="space-y-2">
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Start Offset (seconds)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min="0" max="30" step="0.5"
+              value={conditioning.audioStartOffset}
+              onChange={(e) => onConditioningChange({ audioStartOffset: parseFloat(e.target.value) })}
+              className="flex-1 h-1 accent-emerald-500"
+            />
+            <span className="text-xs text-zinc-400 w-8 text-right">{conditioning.audioStartOffset.toFixed(1)}s</span>
+          </div>
+        </div>
+      )}
+
+      {/* CFG Scale — available for all types */}
+      <div className="mt-3 pt-2 border-t border-zinc-800 space-y-2">
+        <label className="text-[10px] text-zinc-500 uppercase tracking-wide">CFG Scale</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="range" min="1" max="15" step="0.5"
+            value={conditioning.cfgScale}
+            onChange={(e) => onConditioningChange({ cfgScale: parseFloat(e.target.value) })}
+            className="flex-1 h-1 accent-zinc-400"
+          />
+          <span className="text-xs text-zinc-400 w-8 text-right">{conditioning.cfgScale.toFixed(1)}</span>
+        </div>
+      </div>
+
+      {/* Negative prompt — available for all types */}
+      <div className="mt-2 space-y-1">
+        <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Negative Prompt</label>
+        <textarea
+          value={conditioning.negativePrompt}
+          onChange={(e) => onConditioningChange({ negativePrompt: e.target.value })}
+          placeholder="Things to avoid..."
+          className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1.5 resize-none h-14 focus:outline-none focus:ring-1 focus:ring-zinc-600 placeholder:text-zinc-600"
+        />
+      </div>
+    </div>
+  )
+}
+
 function PromptBar({
   mode,
   onModeChange,
@@ -309,14 +467,20 @@ function PromptBar({
   isGenerating,
   inputImage,
   onInputImageChange,
+  inputLastFrameImage,
+  onInputLastFrameImageChange,
   inputAudio,
   onInputAudioChange,
+  inputVideo,
+  onInputVideoChange,
   settings,
   onSettingsChange,
   shouldVideoGenerateWithLtxApi,
   canGenerate,
   buttonLabel,
   buttonIcon,
+  conditioning,
+  onConditioningChange,
 }: {
   mode: 'image' | 'video' | 'retake'
   onModeChange: (mode: 'image' | 'video' | 'retake') => void
@@ -329,8 +493,12 @@ function PromptBar({
   buttonIcon: React.ReactNode
   inputImage: string | null
   onInputImageChange: (url: string | null) => void
+  inputLastFrameImage: string | null
+  onInputLastFrameImageChange: (url: string | null) => void
   inputAudio: string | null
   onInputAudioChange: (url: string | null) => void
+  inputVideo: string | null
+  onInputVideoChange: (url: string | null) => void
   settings: {
     model: string
     duration: number
@@ -343,17 +511,22 @@ function PromptBar({
   }
   onSettingsChange: (settings: any) => void
   shouldVideoGenerateWithLtxApi: boolean
+  conditioning: ConditioningParams
+  onConditioningChange: (patch: Partial<ConditioningParams>) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const lastFrameInputRef = useRef<HTMLInputElement>(null)
   const audioInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [isLastFrameDragOver, setIsLastFrameDragOver] = useState(false)
   const [isAudioDragOver, setIsAudioDragOver] = useState(false)
+  const [isVideoDragOver, setIsVideoDragOver] = useState(false)
+  const [popover, setPopover] = useState<{ type: 'image' | 'lastFrame' | 'video' | 'audio'; x: number; y: number } | null>(null)
   const isRetake = mode === 'retake'
-  const LOCAL_MAX_DURATION: Record<string, number> = { '540p': 20, '720p': 10, '1080p': 5 }
-  const localMaxDuration = LOCAL_MAX_DURATION[settings.videoResolution] ?? 20
   const videoDurationOptions = shouldVideoGenerateWithLtxApi
     ? [...getAllowedForcedApiDurations(settings.model, settings.videoResolution, settings.fps)]
-    : [5, 6, 8, 10, 20].filter(d => d <= localMaxDuration)
+    : [5, 6, 8, 10, 20, 30, 45, 60]
   const videoResolutionOptions = shouldVideoGenerateWithLtxApi
     ? (inputAudio ? ['1080p'] : [...FORCED_API_VIDEO_RESOLUTIONS])
     : ['540p', '720p', '1080p']
@@ -427,6 +600,72 @@ function PromptBar({
     }
   }
   
+  const handleLastFrameDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsLastFrameDragOver(false)
+
+    const assetData = e.dataTransfer.getData('asset')
+    if (assetData) {
+      const asset = JSON.parse(assetData) as Asset
+      if (asset.type === 'image') {
+        onInputLastFrameImageChange(asset.url)
+      }
+    }
+  }
+
+  const handleLastFrameFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file && file.type.startsWith('image/')) {
+      const filePath = (file as any).path as string | undefined
+      if (filePath) {
+        const normalized = filePath.replace(/\\/g, '/')
+        const fileUrl = normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`
+        onInputLastFrameImageChange(fileUrl)
+      } else {
+        const url = URL.createObjectURL(file)
+        onInputLastFrameImageChange(url)
+      }
+    }
+  }
+
+  const handleVideoDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsVideoDragOver(false)
+
+    const assetData = e.dataTransfer.getData('asset')
+    if (assetData) {
+      const asset = JSON.parse(assetData) as Asset
+      if (asset.type === 'video') {
+        onInputVideoChange(asset.url)
+      }
+    }
+
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      const ext = file.name.split('.').pop()?.toLowerCase()
+      if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext || '')) {
+        const filePath = (file as any).path as string | undefined
+        if (filePath) {
+          const normalized = filePath.replace(/\\/g, '/')
+          const fileUrl = normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`
+          onInputVideoChange(fileUrl)
+        }
+      }
+    }
+  }
+
+  const handleVideoFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const filePath = (file as any).path as string | undefined
+      if (filePath) {
+        const normalized = filePath.replace(/\\/g, '/')
+        const fileUrl = normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`
+        onInputVideoChange(fileUrl)
+      }
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !isGenerating && canGenerate) {
       e.preventDefault()
@@ -438,16 +677,18 @@ function PromptBar({
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-visible">
       {/* Top row: Image ref | Prompt | Generate */}
       <div className="flex items-start">
-        {/* Input image drop zone — video mode only (I2V) */}
+        {/* First frame image drop zone — video mode only (I2V) */}
         {mode === 'video' && !isRetake && (
           <div
-            className={`relative w-10 h-10 mx-2 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
-              isDragOver ? 'border-blue-500 bg-blue-500/10' : 'border-zinc-700 hover:border-zinc-500'
+            className={`relative w-10 h-10 ml-2 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
+              isDragOver ? 'border-blue-500 bg-blue-500/10' : inputImage ? 'border-blue-600' : 'border-zinc-700 hover:border-zinc-500'
             }`}
             onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
             onDragLeave={() => setIsDragOver(false)}
             onDrop={handleDrop}
             onClick={() => inputRef.current?.click()}
+            onContextMenu={(e) => { if (inputImage) { e.preventDefault(); setPopover({ type: 'image', x: e.clientX, y: e.clientY }) } }}
+            title={inputImage ? 'First frame image — right-click for settings' : 'Set first frame image'}
           >
             {inputImage ? (
               <>
@@ -460,7 +701,10 @@ function PromptBar({
                 </button>
               </>
             ) : (
-              <Image className="h-4 w-4 text-zinc-500" />
+              <div className="flex flex-col items-center">
+                <Image className="h-4 w-4 text-zinc-500" />
+                <span className="text-[7px] text-zinc-600 mt-0.5">1st</span>
+              </div>
             )}
             <input
               ref={inputRef}
@@ -472,17 +716,57 @@ function PromptBar({
           </div>
         )}
 
+        {/* Last frame image drop zone — video mode only */}
+        {mode === 'video' && !isRetake && (
+          <div
+            className={`relative w-10 h-10 ml-1 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
+              isLastFrameDragOver ? 'border-purple-500 bg-purple-500/10' : inputLastFrameImage ? 'border-purple-600' : 'border-zinc-700 hover:border-zinc-500'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setIsLastFrameDragOver(true) }}
+            onDragLeave={() => setIsLastFrameDragOver(false)}
+            onDrop={handleLastFrameDrop}
+            onClick={() => lastFrameInputRef.current?.click()}
+            onContextMenu={(e) => { if (inputLastFrameImage) { e.preventDefault(); setPopover({ type: 'lastFrame', x: e.clientX, y: e.clientY }) } }}
+            title={inputLastFrameImage ? 'Last frame image — right-click for settings' : 'Set last frame image'}
+          >
+            {inputLastFrameImage ? (
+              <>
+                <img src={inputLastFrameImage} alt="" className="w-full h-full object-cover rounded-md" />
+                <button
+                  onClick={(e) => { e.stopPropagation(); onInputLastFrameImageChange(null) }}
+                  className="absolute -top-1 -right-1 p-0.5 rounded-full bg-zinc-800 text-zinc-400 hover:text-white z-10"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center">
+                <Image className="h-4 w-4 text-zinc-500" />
+                <span className="text-[7px] text-zinc-600 mt-0.5">last</span>
+              </div>
+            )}
+            <input
+              ref={lastFrameInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleLastFrameFileSelect}
+              className="hidden"
+            />
+          </div>
+        )}
+
         {/* Audio drop zone — only in video mode */}
         {mode === 'video' && !isRetake && (
           <div
-            className={`relative w-10 h-10 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
+            className={`relative w-10 h-10 ml-1 mr-1 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
               isAudioDragOver ? 'border-emerald-500 bg-emerald-500/10' : inputAudio ? 'border-emerald-600' : 'border-zinc-700 hover:border-zinc-500'
             }`}
             onDragOver={(e) => { e.preventDefault(); setIsAudioDragOver(true) }}
             onDragLeave={() => setIsAudioDragOver(false)}
             onDrop={handleAudioDrop}
             onClick={() => audioInputRef.current?.click()}
-            title={inputAudio ? 'Audio attached — click to change' : 'Attach audio for A2V'}
+            onContextMenu={(e) => { if (inputAudio) { e.preventDefault(); setPopover({ type: 'audio', x: e.clientX, y: e.clientY }) } }}
+            title={inputAudio ? 'Audio attached — right-click for settings' : 'Attach audio for A2V'}
           >
             {inputAudio ? (
               <>
@@ -502,6 +786,45 @@ function PromptBar({
               type="file"
               accept=".mp3,.wav,.ogg,.aac,.flac,.m4a"
               onChange={handleAudioFileSelect}
+              className="hidden"
+            />
+          </div>
+        )}
+
+        {/* Video input drop zone — V2V mode */}
+        {mode === 'video' && !isRetake && (
+          <div
+            className={`relative w-10 h-10 ml-1 mr-1 mt-2 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center flex-shrink-0 cursor-pointer ${
+              isVideoDragOver ? 'border-orange-500 bg-orange-500/10' : inputVideo ? 'border-orange-600' : 'border-zinc-700 hover:border-zinc-500'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setIsVideoDragOver(true) }}
+            onDragLeave={() => setIsVideoDragOver(false)}
+            onDrop={handleVideoDrop}
+            onClick={() => videoInputRef.current?.click()}
+            onContextMenu={(e) => { if (inputVideo) { e.preventDefault(); setPopover({ type: 'video', x: e.clientX, y: e.clientY }) } }}
+            title={inputVideo ? 'Video attached — right-click for settings' : 'Attach video for V2V'}
+          >
+            {inputVideo ? (
+              <>
+                <Film className="h-4 w-4 text-orange-400" />
+                <button
+                  onClick={(e) => { e.stopPropagation(); onInputVideoChange(null) }}
+                  className="absolute -top-1 -right-1 p-0.5 rounded-full bg-zinc-800 text-zinc-400 hover:text-white z-10"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center">
+                <Film className="h-4 w-4 text-zinc-500" />
+                <span className="text-[7px] text-zinc-600 mt-0.5">V2V</span>
+              </div>
+            )}
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept=".mp4,.mov,.avi,.mkv,.webm"
+              onChange={handleVideoFileSelect}
               className="hidden"
             />
           </div>
@@ -609,6 +932,7 @@ function PromptBar({
                     ]
                   : [
                       { value: 'fast', label: 'LTX 2.3 Fast' },
+                      { value: 'pro', label: 'LTX 2.3 Pro' },
                     ]
               }
               trigger={
@@ -617,7 +941,7 @@ function PromptBar({
                   <span className="text-zinc-300 font-medium">
                     {shouldVideoGenerateWithLtxApi
                       ? (settings.model === 'pro' ? 'LTX-2.3 Pro (API)' : 'LTX-2.3 Fast (API)')
-                      : 'LTX 2.3 Fast'}
+                      : (settings.model === 'pro' ? 'LTX 2.3 Pro' : 'LTX 2.3 Fast')}
                   </span>
                 </>
               }
@@ -644,9 +968,7 @@ function PromptBar({
               title="RESOLUTION"
               value={settings.videoResolution}
               onChange={(v) => {
-                const maxDur = LOCAL_MAX_DURATION[v] ?? 20
-                const clampedDuration = settings.duration > maxDur ? maxDur : settings.duration
-                onSettingsChange({ ...settings, videoResolution: v, duration: clampedDuration })
+                onSettingsChange({ ...settings, videoResolution: v })
               }}
               options={videoResolutionOptions.map((value) => ({ value, label: value }))}
               trigger={
@@ -709,6 +1031,17 @@ function PromptBar({
           {buttonLabel}
         </button>
       </div>
+
+      {/* Right-click media settings popover */}
+      {popover && (
+        <MediaSettingsPopover
+          type={popover.type}
+          position={{ x: popover.x, y: popover.y }}
+          conditioning={conditioning}
+          onConditioningChange={onConditioningChange}
+          onClose={() => setPopover(null)}
+        />
+      )}
     </div>
   )
 }
@@ -785,7 +1118,13 @@ export function GenSpace() {
   const [mode, setMode] = useState<'image' | 'video' | 'retake'>('video')
   const [prompt, setPrompt] = useState('')
   const [inputImage, setInputImage] = useState<string | null>(null)
+  const [inputLastFrameImage, setInputLastFrameImage] = useState<string | null>(null)
   const [inputAudio, setInputAudio] = useState<string | null>(null)
+  const [inputVideo, setInputVideo] = useState<string | null>(null)
+  const [conditioning, setConditioning] = useState<ConditioningParams>({ ...DEFAULT_CONDITIONING })
+  const updateConditioning = useCallback((patch: Partial<ConditioningParams>) => {
+    setConditioning(prev => ({ ...prev, ...patch }))
+  }, [])
   const [localError, setLocalError] = useState<string | null>(null)
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
@@ -919,6 +1258,7 @@ export function GenSpace() {
 
     const genMode = inputAudio
       ? 'audio-to-video'
+      : inputVideo ? 'video-to-video'
       : inputImage ? 'image-to-video' : 'text-to-video'
     const savedVideoSettings = applyForcedVideoSettings(settings)
 
@@ -933,7 +1273,7 @@ export function GenSpace() {
           resolution: savedVideoSettings.videoResolution,
           duration: savedVideoSettings.duration,
           generationParams: {
-            mode: genMode as 'text-to-video' | 'image-to-video' | 'audio-to-video',
+            mode: genMode as 'text-to-video' | 'image-to-video' | 'audio-to-video' | 'video-to-video',
             prompt: lastPrompt,
             model: savedVideoSettings.model,
             duration: savedVideoSettings.duration,
@@ -945,6 +1285,7 @@ export function GenSpace() {
             imageSteps: 4,
             inputImageUrl: inputImage || undefined,
             inputAudioUrl: inputAudio || undefined,
+            inputVideoUrl: inputVideo || undefined,
           },
           takes: [{
             url: finalUrl,
@@ -1107,10 +1448,12 @@ export function GenSpace() {
         }
       )
     } else {
-      // Generate video (t2v if no image/audio, i2v if image, a2v if audio)
+      // Generate video (t2v if no image/audio/video, i2v if image, a2v if audio, v2v if video)
       // Extract filesystem path from the file:// URL for the backend
       const imagePath = inputImage ? fileUrlToPath(inputImage) : null
+      const lastFrameImagePath = inputLastFrameImage ? fileUrlToPath(inputLastFrameImage) : null
       const audioPath = inputAudio ? fileUrlToPath(inputAudio) : null
+      const v2vVideoPath = inputVideo ? fileUrlToPath(inputVideo) : null
       const videoSettings = applyForcedVideoSettings(settings)
       if (audioPath) videoSettings.model = 'pro'
 
@@ -1128,8 +1471,17 @@ export function GenSpace() {
           imageResolution: videoSettings.imageResolution,
           imageAspectRatio: videoSettings.aspectRatio,
           imageSteps: 4,
+          imageStrength: conditioning.imageStrength,
+          lastFrameStrength: conditioning.lastFrameStrength,
+          v2vStrength: conditioning.v2vStrength,
+          v2vKeyframes: conditioning.v2vKeyframes,
+          cfgScale: conditioning.cfgScale,
+          negativePrompt: conditioning.negativePrompt,
+          audioStartOffset: conditioning.audioStartOffset,
         },
         audioPath,
+        lastFrameImagePath,
+        v2vVideoPath,
       )
     }
   }
@@ -1385,11 +1737,17 @@ export function GenSpace() {
           buttonIcon={promptButtonIcon}
           inputImage={inputImage}
           onInputImageChange={setInputImage}
+          inputLastFrameImage={inputLastFrameImage}
+          onInputLastFrameImageChange={setInputLastFrameImage}
           inputAudio={inputAudio}
           onInputAudioChange={setInputAudio}
+          inputVideo={inputVideo}
+          onInputVideoChange={setInputVideo}
           settings={settings}
           onSettingsChange={(nextSettings) => setSettings(applyForcedVideoSettings(nextSettings))}
           shouldVideoGenerateWithLtxApi={shouldVideoGenerateWithLtxApi}
+          conditioning={conditioning}
+          onConditioningChange={updateConditioning}
         />
       </div>
       

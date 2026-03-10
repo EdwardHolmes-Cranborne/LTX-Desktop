@@ -46,7 +46,13 @@ class SettingsPatchModel(SettingsBaseModel):
 
 
 class FastModelSettings(SettingsBaseModel):
+    steps: int = 8
     use_upscaler: bool = True
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def _clamp_steps(cls, value: Any) -> int:
+        return _clamp_int(value, minimum=1, maximum=100, default=8)
 
 
 class ProModelSettings(SettingsBaseModel):
@@ -59,6 +65,20 @@ class ProModelSettings(SettingsBaseModel):
         return _clamp_int(value, minimum=1, maximum=100, default=20)
 
 
+class UserLoraEntry(SettingsBaseModel):
+    path: str = ""
+    strength: float = 1.0
+    enabled: bool = True
+
+    @field_validator("strength", mode="before")
+    @classmethod
+    def _clamp_strength(cls, value: Any) -> float:
+        if value is None:
+            return 1.0
+        v = float(value)
+        return max(0.0, min(2.0, v))
+
+
 class AppSettings(SettingsBaseModel):
     use_torch_compile: bool = False
     load_on_startup: bool = False
@@ -68,9 +88,12 @@ class AppSettings(SettingsBaseModel):
     use_local_text_encoder: bool = False
     fast_model: FastModelSettings = Field(default_factory=FastModelSettings)
     pro_model: ProModelSettings = Field(default_factory=ProModelSettings)
+    user_loras: list[UserLoraEntry] = Field(default_factory=list)
     prompt_cache_size: int = 100
     prompt_enhancer_enabled_t2v: bool = True
     prompt_enhancer_enabled_i2v: bool = False
+    prompt_enhancer_endpoint: str = "http://localhost:1234/v1"
+    prompt_enhancer_model: str = ""
     gemini_api_key: str = ""
     seed_locked: bool = False
     locked_seed: int = 42
@@ -139,9 +162,12 @@ class SettingsResponse(SettingsBaseModel):
     use_local_text_encoder: bool = False
     fast_model: FastModelSettings = Field(default_factory=FastModelSettings)
     pro_model: ProModelSettings = Field(default_factory=ProModelSettings)
+    user_loras: list[UserLoraEntry] = Field(default_factory=list)
     prompt_cache_size: int = 100
     prompt_enhancer_enabled_t2v: bool = True
     prompt_enhancer_enabled_i2v: bool = False
+    prompt_enhancer_endpoint: str = "http://localhost:1234/v1"
+    prompt_enhancer_model: str = ""
     has_gemini_api_key: bool = False
     seed_locked: bool = False
     locked_seed: int = 42

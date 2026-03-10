@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends
 
 from api_types import (
     DownloadProgressResponse,
+    LinkModelsRequest,
+    LinkModelsResponse,
     ModelDownloadRequest,
     ModelDownloadStartResponse,
     ModelInfo,
@@ -59,6 +61,14 @@ def route_model_download(
         )
 
     raise HTTPError(400, "Failed to start download")
+
+
+@router.post("/models/link", response_model=LinkModelsResponse)
+def route_link_models(
+    req: LinkModelsRequest,
+    handler: AppHandler = Depends(get_state_service),
+) -> LinkModelsResponse:
+    return handler.models.link_models_from_directory(req.sourceDir)
 
 
 @router.post("/text-encoder/download", response_model=TextEncoderDownloadResponse)

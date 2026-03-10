@@ -3,6 +3,9 @@ import os
 import sys
 from typing import Any, cast
 
+# Enable MPS fallback for ops not yet natively supported on Metal.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 if os.environ.get("BACKEND_DEBUG") == "1":
     try:
         import debugpy  # type: ignore[reportMissingImports]
@@ -67,7 +70,9 @@ logger.info(f"Log file: {log_file}")
 # ============================================================
 # SageAttention Integration
 # ============================================================
-use_sage_attention = os.environ.get("USE_SAGE_ATTENTION", "1") == "1"
+# SageAttention requires CUDA (Triton kernels); skip entirely on MPS/CPU.
+_sage_default = "0" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and not torch.cuda.is_available()) else "1"
+use_sage_attention = os.environ.get("USE_SAGE_ATTENTION", _sage_default) == "1"
 _sageattention_runtime_fallback_logged = False
 
 if use_sage_attention:
@@ -133,7 +138,17 @@ def _get_device() -> torch.device:
 
 
 DEVICE = _get_device()
-DTYPE = torch.bfloat16
+
+# MPS precision fixes (mirrors HunyuanImage-3.0 patterns).
+if DEVICE.type == "mps":
+    # Prevent silent precision loss in reductions on Metal.
+    torch.backends.mps.allow_reduced_precision_reductions = False  # type: ignore[attr-defined]
+    # Use float32 on MPS — bfloat16 is unsupported and float16 causes Metal matmul
+    # assertion failures on large matrices. float32 matches HunyuanImage-3.0 approach.
+    DTYPE = torch.float32
+    logger.info("MPS detected: using float32 dtype, reduced-precision reductions disabled")
+else:
+    DTYPE = torch.bfloat16
 
 def _resolve_app_data_dir() -> Path:
     env_path = os.environ.get("LTX_APP_DATA_DIR")
@@ -188,6 +203,7 @@ def _resolve_force_api_generations() -> bool:
     gpu_info = GpuInfoImpl()
     system = platform.system()
     cuda_available = gpu_info.get_cuda_available()
+    mps_available = gpu_info.get_mps_available()
     vram_gb = gpu_info.get_vram_total_gb()
 
     # Server-owned source of truth for mode selection.
@@ -195,12 +211,14 @@ def _resolve_force_api_generations() -> bool:
         system=system,
         cuda_available=cuda_available,
         vram_gb=vram_gb,
+        mps_available=mps_available,
     )
     logger.info(
-        "Runtime policy force_api_generations=%s (system=%s cuda_available=%s vram_gb=%s)",
+        "Runtime policy force_api_generations=%s (system=%s cuda_available=%s mps_available=%s vram_gb=%s)",
         force_api_generations,
         system,
         cuda_available,
+        mps_available,
         vram_gb,
     )
     return force_api_generations
@@ -227,6 +245,7 @@ DEFAULT_NEGATIVE_PROMPT = """blurry, out of focus, overexposed, underexposed, lo
 
 runtime_config = RuntimeConfig(
     device=DEVICE,
+    dtype=DTYPE,
     models_dir=MODELS_DIR,
     model_download_specs=DEFAULT_MODEL_DOWNLOAD_SPECS,
     required_model_types=REQUIRED_MODEL_TYPES,

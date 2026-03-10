@@ -80,7 +80,7 @@ REQUIREMENTS_FILE="$BACKEND_DIR/requirements-dist.txt"
 # Running on macOS auto-excludes Windows-only deps (triton-windows, pynvml, sageattention)
 # via sys_platform markers in pyproject.toml.
 uv export --frozen --no-hashes --no-editable --no-emit-project \
-    --no-header --no-annotate \
+    --no-header \
     --project "$BACKEND_DIR" \
     > "$REQUIREMENTS_FILE"
 
