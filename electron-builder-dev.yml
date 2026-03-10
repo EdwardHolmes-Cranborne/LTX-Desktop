@@ -1,0 +1,92 @@
+appId: com.lightricks.ltx-desktop
+productName: LTX Desktop
+copyright: Copyright © 2026 Lightricks
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - LICENSE.txt
+  - NOTICES.md
+  - "!**/*.map"
+
+asarUnpack:
+  - dist/splash/**
+
+extraResources:
+  - from: backend
+    to: backend
+    filter:
+      - "**/*.py"
+      - pyproject.toml
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+      - "!.venv/**"
+      - "!outputs/**"
+      - "!models/**"
+      - "!tests/**"
+  - from: python-deps-hash.txt
+    to: python-deps-hash.txt
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+  artifactName: ${productName}-Setup.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  include: resources/installer.nsh
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LTX Desktop
+
+mac:
+  hardenedRuntime: true
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  notarize: true
+  signIgnore:
+    # Skip non-binary files in the bundled Python environment during codesign.
+    # Without this, @electron/osx-sign walks all ~25k files to find ~360 Mach-O
+    # binaries, hitting the macOS 10240 open-files-per-process limit.
+    - "/python/.*\\.(py|pyc|pyi|pxd|pyx|h|hpp|cpp|c|cuh|cu|tcl|txt|json|yaml|yml|toml|cfg|md|rst|html|css|enc|msg|cmake|gif|png|jpg|svg|xml|jinja|typed|al)$"
+    - "/python/.*\\.dist-info/"
+  extraResources:
+    - from: python-embed
+      to: python
+      filter:
+        - "**/*"
+        - "!__pycache__/**"
+        - "!*.pyc"
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  icon: resources/icon.icns
+  category: public.app-category.video
+  artifactName: ${productName}-${arch}.${ext}
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+publish:
+  provider: github
+  owner: Lightricks
+  repo: ltx-desktop

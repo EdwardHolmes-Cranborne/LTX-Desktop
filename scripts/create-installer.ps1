@@ -7,6 +7,7 @@
 
 param(
     [switch]$Unpack,
+    [switch]$SkipSigning,
     [string]$Publish = ""
 )
 
@@ -30,17 +31,25 @@ if (-not (Test-Path "python-embed")) {
 }
 
 # Build with electron-builder
+$BuilderArgs = @("--win")
+
+if ($SkipSigning) {
+    Write-Host "Skipping code signing (local dev)..." -ForegroundColor Yellow
+    $DevConfigPath = Join-Path $ProjectDir "electron-builder-dev.yml"
+    $BuilderArgs = @("--config", $DevConfigPath, "--win")
+}
+
 if ($Unpack) {
     Write-Host "Packaging unpacked app (fast mode)..." -ForegroundColor Yellow
-    pnpm exec electron-builder --win --dir
+    $BuilderArgs += "--dir"
 } else {
     Write-Host "Packaging installer..." -ForegroundColor Yellow
-    $PublishArgs = @()
     if ($Publish -ne "") {
-        $PublishArgs = @("--publish", $Publish)
+        $BuilderArgs += @("--publish", $Publish)
     }
-    pnpm exec electron-builder --win @PublishArgs
 }
+
+pnpm exec electron-builder @BuilderArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Failed to build!" -ForegroundColor Red

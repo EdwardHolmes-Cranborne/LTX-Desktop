@@ -5,6 +5,7 @@
 
 param(
     [switch]$SkipPython,
+    [switch]$SkipSigning,
     [switch]$Clean,
     [switch]$Unpack,
     [string]$Publish = ""
@@ -104,6 +105,7 @@ if ($LASTEXITCODE -ne 0) {
 # ============================================================
 $pkgParams = @{}
 if ($Unpack)         { $pkgParams["Unpack"] = $true }
+if ($SkipSigning)    { $pkgParams["SkipSigning"] = $true }
 if ($Publish -ne "") { $pkgParams["Publish"] = $Publish }
 
 & "$ScriptDir\create-installer.ps1" @pkgParams
